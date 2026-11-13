@@ -74,11 +74,32 @@ export async function listActivity(days=10){
     .sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
 }
 export async function readTab(title){
-  const s=await api();
-  const r=await s.spreadsheets.values.get({spreadsheetId:SHEET_ID,range:`'${title.replace(/'/g,"''")}'!A:ZZ`,valueRenderOption:"UNFORMATTED_VALUE"});
-  const values=r.data.values||[];
-  if(!values.length)return {headers:[],rows:[]};
-  return {headers:values[0].map(x=>String(x||"").trim()),rows:values.slice(1).filter(row=>row.some(x=>x!==""&&x!==null))};
+  if (!title || typeof title !== "string") throw new Error("Sheet name is empty or invalid.");
+  const s = await api();
+  const escapedTitle = title.replace(/'/g, "''");
+  let response;
+  try {
+    response = await s.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `'${escapedTitle}'!A:ZZ`,
+      valueRenderOption: "UNFORMATTED_VALUE",
+      dateTimeRenderOption: "SERIAL_NUMBER"
+    });
+  } catch (error) {
+    const status = error?.code || error?.response?.status;
+    if (status === 400 || status === 404) {
+      throw new Error(`Tab "${title}" tidak ditemukan atau nama tab tidak cocok.`);
+    }
+    if (status === 403) {
+      throw new Error(`Akses ditolak untuk tab "${title}". Pastikan service account memiliki akses Viewer ke spreadsheet.`);
+    }
+    throw new Error(`Google Sheets API gagal membaca tab "${title}": ${error.message || "unknown error"}`);
+  }
+  const values = response.data.values || [];
+  if (!values.length) return { headers: [], rows: [] };
+  const headers = (values[0] || []).map(value => String(value ?? "").trim());
+  const rows = values.slice(1).filter(row => row.some(value => value !== "" && value !== null && value !== undefined));
+  return { headers, rows };
 }
 export async function appendUser(values){
   const s=await api();

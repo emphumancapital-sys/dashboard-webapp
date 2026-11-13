@@ -112,3 +112,18 @@ Dashboard source tabs default to the names listed above. Header matching is defe
 ## Phase 1 boundary
 
 No employee CRUD, recruitment CRUD, import/export, email reminders, or scheduled automations yet. These are intentionally deferred until the spreadsheet schema is validated. Export/import in later phases must preserve the original master headers and column ordering.
+
+## Phase 1 data-sync hardening (November 2026)
+
+The dashboard endpoint now reads each Phase 1 source independently. A missing or inaccessible tab is reported as a source warning and no longer causes all dashboard metrics to fail. The Overview reports per-tab row counts and the detected header list when a required mapping is missing.
+
+Phase 1 Overview sources:
+- `2026 Rec Pipeline` — RFP aging reminders (exact normalized types: PKWT Addition, PKWT Replacement, TPC to PKWT; age >= 30 days).
+- `New Hire 2026` — new-hire record count, join count for current year, contract-end reminders.
+- `Extend 2026` — contract-end reminders.
+- `Resignation 2026`, `Termination 2026`, `Retirement 2026` — movement record counts.
+- `EMP Activity Log` — recent activity (last 10 days).
+
+The original Recruitment Pipeline uses header terminology including `Req Date` / `RFP Received`, `Contract Type`, and `RFP Process`; these are explicitly supported. Date parsing supports Google Sheets serial dates and common `dd/MM/yyyy` values.
+
+Important: the dashboard cannot verify the live workbook from this package alone. After deploying this update, inspect the source diagnostics shown in the Overview. If a source is unavailable, confirm the exact tab name and share the spreadsheet with the service-account email as Viewer (Editor is only needed for system-owned EMP tabs/user management). Do not paste the service-account JSON or secrets into GitHub.
