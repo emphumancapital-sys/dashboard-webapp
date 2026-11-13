@@ -106,7 +106,7 @@
           <div class="heading-actions"><span class="updated-label" id="pipeUpdated">—</span></div>
         </div>
         <div class="data-toolbar">
-          <div class="segmented" id="pipeView" role="tablist"><button type="button" role="tab" class="active" data-view="board" aria-selected="true">Ongoing <i id="pipeOngoingCount">0</i></button><button type="button" role="tab" data-view="completed" aria-selected="false">Completed <i id="pipeCompletedCount">0</i></button></div>
+          <div class="segmented" id="pipeView" role="tablist"><button type="button" role="tab" class="active" data-view="board" aria-selected="true">Ongoing <i id="pipeOngoingCount">0</i></button><button type="button" role="tab" data-view="completed" aria-selected="false">Completed <i id="pipeCompletedCount">0</i></button><button type="button" role="tab" data-view="failed" aria-selected="false">Failed <i id="pipeFailedCount">0</i></button></div>
           <div class="search-box"><span data-icon="search"></span><input id="pipeSearch" placeholder="Search position, RFP code, candidate…" autocomplete="off" aria-label="Search requests"><button type="button" class="search-clear" id="pipeSearchClear" aria-label="Clear search" title="Clear search" hidden><span data-icon="x"></span></button></div>
           <div class="toolbar-select"><select id="pipeBU" aria-label="Filter by business unit" data-placeholder="All business units"><option value="">All business units</option></select></div>
           <button type="button" class="unsent-chip" id="pipeUnsent" aria-haspopup="dialog" hidden></button>
@@ -114,7 +114,8 @@
           <span class="record-count" id="pipeCount">—</span>
         </div>
         <div class="kanban" id="pipeBoard"></div>
-        <section class="panel" id="pipeCompleted" hidden><div class="table-scroll"><table><thead id="pipeHead"><tr><th><button type="button" class="th-sort" data-key="code">RFP Code<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="position">Position<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="businessUnit">Business Unit<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="candidates">Candidate<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="joinIso">Join Date<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="completionDays">Completion Days<span class="sort-ico"></span></button></th><th class="col-actions" aria-label="Actions"></th></tr></thead><tbody id="pipeRows"></tbody></table></div></section>
+        <section class="panel pipe-list" id="pipeCompleted" hidden><div class="table-scroll"><table><thead id="pipeHead"><tr><th><button type="button" class="th-sort" data-key="code">RFP Code<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="position">Position<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="businessUnit">Business Unit<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="candidates">Candidate<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="joinIso">Join Date<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="completionDays">Completion Days<span class="sort-ico"></span></button></th><th class="col-actions" aria-label="Actions"></th></tr></thead><tbody id="pipeRows"></tbody></table></div></section>
+        <section class="panel pipe-list" id="pipeFailed" hidden><div class="table-scroll"><table><thead id="pipeFailedHead"><tr><th><button type="button" class="th-sort" data-key="code">RFP Code<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="position">Position<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="businessUnit">Business Unit<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="candidates">Candidate<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="stageLabel">Reached<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="lastNote">Reason<span class="sort-ico"></span></button></th></tr></thead><tbody id="pipeFailedRows"></tbody></table></div></section>
         <div class="warning-box" id="pipeError" hidden></div>
       </section>
       <section class="page" id="page-organization">
@@ -173,7 +174,7 @@
     <form id="pipeForm" novalidate>
       <div class="modal-body"><dl class="info-grid" id="pipeInfo"></dl><div class="section-label">Stages</div><div class="stage-list" id="pipeStages"></div></div>
       <div id="pipeFormError" class="form-error" hidden></div>
-      <div class="modal-footer"><div class="modal-hint"><button type="button" class="secondary-button" id="pipeStatusButton"></button></div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelPipeModal">Close</button><button class="primary-button" id="savePipeButton">Save Changes</button></div></div>
+      <div class="modal-footer"><div class="modal-hint"><button type="button" class="secondary-button" id="pipeStatusButton"></button><button type="button" class="text-button danger" id="pipeFailButton">Mark as failed</button></div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelPipeModal">Close</button><button class="primary-button" id="savePipeButton">Save Changes</button></div></div>
     </form>
   </div></div>
 
@@ -183,6 +184,19 @@
       <div class="modal-body"><div class="modal-note" id="moveNote" hidden></div><div class="field" id="moveField"><span class="field-label" id="moveLabel">Date</span><div id="moveDateSlot"></div><small class="field-help">Written to the sheet as this stage's date.</small></div></div>
       <div id="moveError" class="form-error" hidden></div>
       <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelMoveModal">Cancel</button><button class="primary-button" id="moveOk">Move</button></div></div>
+    </form>
+  </div></div>
+
+  <div class="modal-backdrop" id="outcomeModal" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="outcomeTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" id="outcomeIcon"></span><div><h2 id="outcomeTitle">Outcome</h2><p id="outcomeSub"></p></div></div><button type="button" class="close-button" id="closeOutcomeModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <form id="outcomeForm" novalidate>
+      <div class="modal-body"><div class="field-grid single">
+        <div class="field"><label class="field-label" for="outcomeNote" id="outcomeNoteLabel">Note <em>*</em></label><textarea id="outcomeNote" rows="3" maxlength="500"></textarea><small class="field-help" id="outcomeNoteHelp"></small></div>
+        <div class="field"><span class="field-label">Date</span><div id="outcomeDateSlot"></div></div>
+        <div class="field" id="outcomeContinueField"><label class="switch-field"><input type="checkbox" id="outcomeContinue" checked><i class="switch"></i><span>Continue this RFP with a new candidate</span></label><small class="field-help">Adds a new row for the same RFP under Sourcing. This row stays in the sheet as history.</small></div>
+      </div></div>
+      <div id="outcomeError" class="form-error" hidden></div>
+      <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelOutcomeModal">Cancel</button><button class="primary-button" id="outcomeOk">Save</button></div></div>
     </form>
   </div></div>
 

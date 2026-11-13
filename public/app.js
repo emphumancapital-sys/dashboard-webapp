@@ -5,7 +5,7 @@ const state = {
   sort: { column: null, dir: "desc" }, headers: [], columnIndexes: [], columnMeta: {},
   searchTimer: null, recordSchema: null, schemaCache: new Map(), recordToken: 0, editingRowNumber: null, currentRows: new Map(),
   organization: [], organizationLoaded: false, organizationCategory: "Department", editingOrgRow: null,
-  tableSort: { org: { key: null, dir: "desc" }, users: { key: null, dir: "desc" }, pipe: { key: null, dir: "desc" } },
+  tableSort: { org: { key: null, dir: "desc" }, users: { key: null, dir: "desc" }, pipe: { key: null, dir: "desc" }, pipeFailed: { key: null, dir: "desc" } },
   pipe: { stages: [], cards: [], statusValues: [], codes: new Set(), unsent: [], rfpTab: "RFP 2026", view: "board", loaded: false, token: 0, drag: null, move: null, detailRow: null, tab: "", statusHeader: "RFP Process" }
 };
 const PAGE_SIZES = [25, 50, 100, 200];
@@ -53,6 +53,7 @@ function bindEvents() {
   bindModal("userModal", closeUserModal, ["closeModal", "cancelModal"]);
   bindModal("pipeModal", closePipeDetail, ["closePipeModal", "cancelPipeModal"]);
   bindModal("moveModal", closeMoveDialog, ["closeMoveModal", "cancelMoveModal"]);
+  bindModal("outcomeModal", closeOutcomeDialog, ["closeOutcomeModal", "cancelOutcomeModal"]);
   bindModal("confirmModal", () => settleConfirm(false), ["confirmCancel"]);
   bindPipeline();
   $("confirmOk").addEventListener("click", () => settleConfirm(true));
@@ -510,7 +511,7 @@ function pipeStageIndex(key) { return state.pipe.stages.findIndex(s => s.key ===
 function pipeStage(key) { return state.pipe.stages.find(s => s.key === key) || PIPE_START; }
 function pipeCard(rowNumber) { return state.pipe.cards.find(c => c.rowNumber === rowNumber); }
 function pipeDate(part) { return part?.iso ? formatDate(part.iso) : (part?.value || ""); }
-function pipeDecorate(card) { card.joinIso = card.stages?.join?.iso || ""; return card; }
+function pipeDecorate(card) { card.joinIso = card.stages?.join?.iso || ""; card.stageLabel = pipeStage(card.stage).label; return card; }
 function pipeFiltered(group) {
   const q = $("pipeSearch").value.toLowerCase().trim(), bu = $("pipeBU").value;
   return state.pipe.cards.filter(c => c.group === group && (!bu || c.businessUnit === bu) && (!q || [c.code, c.position, c.candidates, c.businessUnit, c.department, c.initiator].join(" ").toLowerCase().includes(q)));
@@ -523,10 +524,16 @@ function bindPipeline() {
   $("pipeBU").addEventListener("change", renderPipeline);
   $("pipeUnsent").addEventListener("click", () => openUnsentList($("pipeUnsent")));
   bindLocalSort("pipeHead", "pipe", renderPipeline);
+  bindLocalSort("pipeFailedHead", "pipeFailed", renderPipeline);
+  $("pipeFailedRows").addEventListener("click", e => { const tr = e.target.closest("[data-pipe-row]"); if (tr) openPipeDetail(Number(tr.dataset.pipeRow)); });
+  $("outcomeForm").addEventListener("submit", submitOutcome);
+  $("pipeFailButton").addEventListener("click", () => { const rowNumber = state.pipe.detailRow; if (rowNumber) { closePipeDetail(); openOutcomeDialog(rowNumber, "fail"); } });
   board.addEventListener("click", e => {
     const cardEl = e.target.closest(".k-card"); if (!cardEl) return; const rowNumber = Number(cardEl.dataset.row);
     const next = e.target.closest("[data-pipe-next]"), menu = e.target.closest("[data-pipe-menu]");
-    if (next) requestMove(rowNumber, next.dataset.pipeNext);
+    const outcome = e.target.closest("[data-pipe-outcome]");
+    if (outcome) openOutcomeDialog(rowNumber, outcome.dataset.pipeOutcome);
+    else if (next) requestMove(rowNumber, next.dataset.pipeNext);
     else if (e.target.closest("[data-pipe-complete]")) setPipeStatus(rowNumber, "complete");
     else if (menu) openStageMenu(menu, rowNumber);
     else openPipeDetail(rowNumber);
@@ -559,7 +566,7 @@ async function loadPipeline(forceRefresh = false, quiet = false) {
   try {
     const d = await api(`${PIPE_API}${forceRefresh ? "?refresh=1" : ""}`);
     if (token !== p.token) return;
-    p.stages = d.stages || []; p.cards = (d.cards || []).map(pipeDecorate); p.statusValues = d.statusValues || []; p.codes = new Set(d.codes || []); p.unsent = d.unsent || []; p.rfpTab = d.rfpTab || p.rfpTab; p.tab = d.tab || ""; p.statusHeader = d.statusHeader || "RFP Process"; p.loaded = true;
+    p.stages = d.stages || []; p.cards = (d.cards || []).map(pipeDecorate); p.outcomeHeader = d.outcomeHeader || "Status"; p.statusValues = d.statusValues || []; p.codes = new Set(d.codes || []); p.unsent = d.unsent || []; p.rfpTab = d.rfpTab || p.rfpTab; p.tab = d.tab || ""; p.statusHeader = d.statusHeader || "RFP Process"; p.loaded = true;
     $("pipeError").hidden = true; $("pipeSubtitle").textContent = `Ongoing requests from ${p.tab}, stage by stage.`;
     $("pipeUpdated").textContent = `Updated ${new Date(d.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     const units = [...new Set(p.cards.map(c => c.businessUnit).filter(Boolean))].sort((a, b) => a.localeCompare(b)), select = $("pipeBU"), keep = select.value;
@@ -574,12 +581,13 @@ async function loadPipeline(forceRefresh = false, quiet = false) {
 }
 function renderPipeline() {
   const p = state.pipe, board = $("pipeBoard"), isBoard = p.view === "board";
-  $("pipeOngoingCount").textContent = p.cards.filter(c => c.group === "ongoing").length; $("pipeCompletedCount").textContent = p.cards.filter(c => c.group === "completed").length;
+  $("pipeOngoingCount").textContent = p.cards.filter(c => c.group === "ongoing").length; $("pipeCompletedCount").textContent = p.cards.filter(c => c.group === "completed").length; $("pipeFailedCount").textContent = p.cards.filter(c => c.group === "failed").length;
   $("pipeView").querySelectorAll("[data-view]").forEach(b => { const on = b.dataset.view === p.view; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); });
-  board.hidden = !isBoard; $("pipeCompleted").hidden = isBoard;
+  board.hidden = !isBoard; $("pipeCompleted").hidden = p.view !== "completed"; $("pipeFailed").hidden = p.view !== "failed";
   const waiting = p.unsent.length; $("pipeUnsent").hidden = !waiting; $("pipeUnsent").innerHTML = `${svgIcon("send", 13)}<b>${waiting}</b> RFP${waiting === 1 ? "" : "s"} not in pipeline`;
-  const list = pipeFiltered(isBoard ? "ongoing" : "completed"), filtering = !!($("pipeSearch").value.trim() || $("pipeBU").value);
+  const list = pipeFiltered(isBoard ? "ongoing" : p.view), filtering = !!($("pipeSearch").value.trim() || $("pipeBU").value);
   $("pipeCount").textContent = `${list.length.toLocaleString()} ${filtering ? (list.length === 1 ? "match" : "matches") : (list.length === 1 ? "request" : "requests")}`;
+  if (p.view === "failed") { renderPipeFailed(list, filtering); return; }
   if (!isBoard) { renderPipeCompleted(list, filtering); return; }
   if (!p.cards.some(c => c.group === "ongoing")) {
     const found = p.statusValues.filter(v => v.value).map(v => `${v.value} (${v.count})`).join(", ");
@@ -600,16 +608,49 @@ function pipeCardHtml(card) {
     : `<button type="button" class="k-next" data-pipe-next="${next.key}" title="Move to ${escAttr(next.label)}">${esc(next.label)}${svgIcon("arrow-right", 13)}</button>`;
   return `<article class="k-card${card.pending ? " is-pending" : ""}" draggable="true" tabindex="0" data-row="${card.rowNumber}" aria-label="${escAttr(card.position || card.code)}">
     <div class="k-top"><span class="k-code">${esc(card.code || `Row ${card.rowNumber}`)}</span>${age === null ? "" : `<span class="k-age${age > 60 ? " late" : age > 30 ? " warn" : ""}" title="${age} day${age === 1 ? "" : "s"} since the RFP was received">${age}d</span>`}</div>
-    <b class="k-title">${esc(card.position || "Untitled position")}</b>
+    <b class="k-title">${esc(card.position || "Untitled position")}</b>${card.negotiations && card.stage === "offerIn" || card.failedBefore ? `<div class="k-badges">${card.negotiations && card.stage === "offerIn" ? `<span class="k-badge nego" title="${escAttr(card.lastNote)}">Negotiating${card.negotiations > 1 ? ` ×${card.negotiations}` : ""}</span>` : ""}${card.failedBefore ? `<span class="k-badge retry" title="${card.failedBefore} earlier candidate${card.failedBefore === 1 ? "" : "s"} failed for this RFP">Candidate #${card.failedBefore + 1}</span>` : ""}</div>` : ""}
     <div class="k-meta">${esc([card.businessUnit, card.department].filter(Boolean).join(" · ") || "—")}</div>
     ${card.candidates ? `<div class="k-cand">${svgIcon("user", 12)}<span>${esc(card.candidates)}</span></div>` : ""}
     <div class="k-since">${svgIcon("calendar", 12)}${esc(card.stage ? `${pipeStage(card.stage).label}: ${since || "—"}` : `Received ${since || "—"}`)}</div>
     <div class="k-foot">${action}<button type="button" class="row-action" data-pipe-menu title="Move to another stage" aria-label="Move ${escAttr(card.code)} to another stage" aria-haspopup="menu">${svgIcon("more", 15)}</button></div>
+    ${card.stage === "offerIn" ? `<div class="k-outcomes"><button type="button" data-pipe-outcome="negotiate" title="Candidate is renegotiating the offer">${svgIcon("rotate-cw", 11)}Negotiating</button><button type="button" class="danger" data-pipe-outcome="fail" title="Candidate declined the offer">${svgIcon("x", 11)}Declined</button></div>` : ""}
   </article>`;
 }
 function renderPipeCompleted(list, filtering) {
   const rows = applyLocalSort(list, "pipe"); paintLocalSort("pipeHead", "pipe");
   $("pipeRows").innerHTML = rows.length ? rows.map(c => `<tr data-pipe-row="${c.rowNumber}" class="is-clickable"><td><b>${esc(c.code)}</b></td><td>${esc(c.position)}</td><td>${esc(c.businessUnit)}</td><td>${esc(c.candidates || "—")}</td><td>${esc(pipeDate(c.stages.join) || "—")}</td><td>${esc(c.completionDays || "—")}</td><td class="col-actions"><div class="row-actions"><button type="button" class="row-action" data-pipe-reopen title="Reopen (move back to the board)" aria-label="Reopen ${escAttr(c.code)}">${svgIcon("undo", 14)}</button></div></td></tr>`).join("") : `<tr><td colspan="7" class="empty-cell">${filtering ? emptyBlock("search", "No matching requests", "Nothing in the completed list matches this filter.") : emptyBlock("inbox", "Nothing completed yet", "Requests appear here once they are marked completed.")}</td></tr>`;
+}
+function renderPipeFailed(list, filtering) {
+  const rows = applyLocalSort(list, "pipeFailed"); paintLocalSort("pipeFailedHead", "pipeFailed");
+  $("pipeFailedRows").innerHTML = rows.length ? rows.map(c => `<tr data-pipe-row="${c.rowNumber}" class="is-clickable"><td><b>${esc(c.code)}</b></td><td>${esc(c.position)}</td><td>${esc(c.businessUnit)}</td><td>${esc(c.candidates || "—")}</td><td>${esc(c.stageLabel)}</td><td class="cell-note" title="${escAttr(c.lastNote)}">${esc(c.lastNote || "—")}</td></tr>`).join("") : `<tr><td colspan="6" class="empty-cell">${filtering ? emptyBlock("search", "No matching rows", "Nothing in the failed list matches this filter.") : emptyBlock("inbox", "No failed candidates", `Rows whose ${state.pipe.outcomeHeader || "Status"} is Failed are kept here as history.`)}</td></tr>`;
+}
+// Negotiation note or failed candidate: one small dialog for both outcomes.
+function openOutcomeDialog(rowNumber, kind) {
+  const card = pipeCard(rowNumber); if (!card || card.pending) return; const fail = kind === "fail", atOffer = card.stage === "offerIn" || card.stage === "offerDone";
+  state.pipe.outcome = { rowNumber, kind };
+  $("outcomeTitle").textContent = fail ? (atOffer ? "Candidate declined" : "Mark candidate as failed") : "Negotiation note"; $("outcomeSub").textContent = [card.code, card.candidates || card.position, pipeStage(card.stage).label].filter(Boolean).join(" · ");
+  $("outcomeIcon").className = "modal-icon" + (fail ? " danger" : " amber"); $("outcomeIcon").innerHTML = svgIcon(fail ? "x" : "rotate-cw", 17);
+  $("outcomeNoteLabel").innerHTML = (fail ? "Reason" : "What is being negotiated") + " <em>*</em>"; $("outcomeNote").value = ""; $("outcomeNote").placeholder = fail ? (atOffer ? "e.g. Declined the offer, accepted another company" : "e.g. Did not pass the interview") : "e.g. Asked for a higher salary and a later join date";
+  $("outcomeNoteHelp").textContent = fail ? `Added to Remarks. ${state.pipe.outcomeHeader || "Status"} is set to Failed and this row leaves the board.` : "Added to Remarks as a dated line. The card stays in its stage.";
+  $("outcomeDateSlot").innerHTML = dateFieldHtml("outcomeDate", isoOf(new Date()), "outcomeDateTrigger"); syncDateField($("outcomeDateSlot").firstElementChild);
+  $("outcomeContinueField").hidden = !fail; $("outcomeContinue").checked = true; $("outcomeError").hidden = true;
+  $("outcomeOk").textContent = fail ? "Mark as failed" : "Save note"; $("outcomeOk").className = fail ? "danger-button" : "primary-button";
+  openModal("outcomeModal", $("outcomeNote"));
+}
+function closeOutcomeDialog() { closeModal("outcomeModal"); state.pipe.outcome = null; }
+async function submitOutcome(e) {
+  e.preventDefault(); const o = state.pipe.outcome, card = o && pipeCard(o.rowNumber), btn = $("outcomeOk"), err = $("outcomeError"); if (!card) return;
+  const note = $("outcomeNote").value.trim(), date = $("outcomeDateSlot").querySelector("input").value, fail = o.kind === "fail"; err.hidden = true;
+  if (!note || !date) { err.textContent = !note ? (fail ? "Enter the reason." : "Enter a short note.") : "Pick a date."; err.hidden = false; (!note ? $("outcomeNote") : $("outcomeDateTrigger")).focus(); return; }
+  const label = btn.textContent; setBusy(btn, true, "Saving…");
+  try {
+    const result = await api(PIPE_API, { method: "POST", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, action: fail ? "fail" : "negotiate", note, date, continue: fail && $("outcomeContinue").checked }) });
+    closeOutcomeDialog();
+    if (fail) { card.group = "failed"; card.lastNote = note; toast(result.newRow ? `${card.code}: candidate marked as failed. A new row was added for the next candidate.` : `${card.code}: candidate marked as failed.`, "success", { duration: 5000 }); if (result.warning) toast(result.warning, "warning", { duration: 12000 }); }
+    else { card.negotiations = (card.negotiations || 0) + 1; card.lastNote = note; toast(`${card.code}: negotiation noted.`, "success"); }
+    renderPipeline(); loadPipeline(true, true);
+  } catch (error) { err.textContent = error.message; err.hidden = false; }
+  finally { setBusy(btn, false, label); }
 }
 // Can this card go to that stage? Returns the manual stage dates a backward move would clear.
 function moveCheck(card, targetKey) {
@@ -625,7 +666,8 @@ function openStageMenu(button, rowNumber) {
   const card = pipeCard(rowNumber); if (!card) return;
   const panel = document.createElement("div"); panel.className = "select-pop stage-menu"; panel.setAttribute("role", "menu"); panel.tabIndex = -1;
   panel.innerHTML = `<div class="pop-title">Move ${esc(card.code)} to</div>` + pipeColumns().map(stage => { const check = moveCheck(card, stage.key), current = (card.stage || null) === stage.key; return `<button type="button" role="menuitem" class="pop-option${current ? " is-selected" : ""}" data-stage="${stage.key ?? ""}" ${check.ok ? "" : "disabled"} title="${escAttr(check.reason || (current ? "Current stage" : ""))}"><span>${esc(stage.label)}</span>${current ? svgIcon("check", 14) : stage.mode === "auto" ? `<em>${svgIcon("lock", 11)}Auto</em>` : ""}</button>`; }).join("");
-  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b || b.disabled) return; Pop.close(); requestMove(rowNumber, b.dataset.stage || null); });
+  panel.insertAdjacentHTML("beforeend", `<div class="pop-sep"></div><button type="button" role="menuitem" class="pop-option" data-outcome="negotiate"><span>Add negotiation note…</span></button><button type="button" role="menuitem" class="pop-option is-danger" data-outcome="fail"><span>Mark candidate as failed…</span></button>`);
+  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b || b.disabled) return; Pop.close(); if (b.dataset.outcome) openOutcomeDialog(rowNumber, b.dataset.outcome); else requestMove(rowNumber, b.dataset.stage || null); });
   panel.addEventListener("keydown", e => { if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return; e.preventDefault(); const items = [...panel.querySelectorAll(".pop-option:not(:disabled)")], i = items.indexOf(document.activeElement); items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus(); });
   Pop.open(button, panel); (panel.querySelector(".pop-option:not(:disabled)") || panel).focus({ preventScroll: true });
 }
@@ -645,7 +687,7 @@ function requestMove(rowNumber, targetKey) {
 function openUnsentList(button) {
   if (Pop.current?.anchor === button) { Pop.close(); return; }
   const panel = document.createElement("div"); panel.className = "select-pop unsent-pop"; panel.tabIndex = -1;
-  panel.innerHTML = `<div class="pop-title">In ${esc(state.pipe.rfpTab)} but not yet in the pipeline</div><div class="pop-list">${state.pipe.unsent.map(r => `<div class="unsent-row"><div><b>${esc(r.code)}</b><small>${esc([r.position, r.businessUnit].filter(Boolean).join(" · ") || "—")}</small></div><button type="button" class="k-next" data-send="${r.rowNumber}" data-code="${escAttr(r.code)}">${svgIcon("send", 12)}Send</button></div>`).join("")}</div>`;
+  panel.innerHTML = `<div class="pop-title">In ${esc(state.pipe.rfpTab)} but not yet in the pipeline</div><div class="pop-list">${state.pipe.unsent.map(r => `<div class="unsent-row"><div><b>${esc(r.code)}</b><small>${esc([r.position, r.businessUnit].filter(Boolean).join(" · ") || "—")}</small>${r.failedBefore ? `<small class="is-retry">Previous candidate failed · needs a new row</small>` : ""}</div><button type="button" class="k-next" data-send="${r.rowNumber}" data-code="${escAttr(r.code)}">${svgIcon("send", 12)}Send</button></div>`).join("")}</div>`;
   panel.addEventListener("click", e => { const b = e.target.closest("[data-send]"); if (!b) return; Pop.close(); sendRfpToPipeline(Number(b.dataset.send), b.dataset.code); });
   Pop.open(button, panel); (panel.querySelector("[data-send]") || panel).focus({ preventScroll: true });
 }
@@ -691,11 +733,11 @@ async function setPipeStatus(rowNumber, action) {
   catch (error) { Object.assign(card, before); card.pending = false; renderPipeline(); toast(error.message, "error", { duration: 8000 }); }
 }
 function openPipeDetail(rowNumber, keepScroll = false) {
-  const card = pipeCard(rowNumber); if (!card) return; const done = card.group === "completed", stages = state.pipe.stages, body = $("pipeModal").querySelector(".modal-body"), top = body.scrollTop;
+  const card = pipeCard(rowNumber); if (!card) return; const done = card.group !== "ongoing", stages = state.pipe.stages, body = $("pipeModal").querySelector(".modal-body"), top = body.scrollTop;
   state.pipe.detailRow = rowNumber;
-  $("pipeModalTitle").textContent = card.position || card.code; $("pipeModalSub").textContent = [card.code, card.status, `Row ${card.rowNumber}`].filter(Boolean).join(" · ");
+  $("pipeModalTitle").textContent = card.position || card.code; $("pipeModalSub").textContent = [card.code, card.group === "failed" ? (card.outcome || "Failed") : card.status, `Row ${card.rowNumber}`].filter(Boolean).join(" · ");
   const info = [["Business unit", card.businessUnit], ["Department", card.department], ["Division", card.division], ["Contract", card.contract], ["Location", card.location], ["Required person", card.requiredPerson], ["Candidates", card.candidates], ["RFP received", card.receivedIso ? formatDate(card.receivedIso) : card.received], ["Hiring date request", card.hiringDateIso ? formatDate(card.hiringDateIso) : card.hiringDate], ["Initiator", card.initiator], ["Reason", card.reason], ...(done ? [["Completion days", card.completionDays]] : []), ["Remarks", card.remarks, true]].filter(x => x[1]);
-  $("pipeInfo").innerHTML = info.map(([label, value, wide]) => `<div${wide ? ' class="is-wide"' : ""}><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
+  $("pipeInfo").innerHTML = info.map(([label, value, wide]) => `<div${wide ? ' class="is-wide"' : ""}><dt>${esc(label)}</dt><dd${wide ? ' class="is-multiline"' : ""}>${esc(value)}</dd></div>`).join("");
   $("pipeStages").innerHTML = stages.map(stage => {
     const part = card.stages[stage.key] || {}, state_ = part.reached ? (card.stage === stage.key ? "is-current" : "is-done") : "is-pending";
     let control;
@@ -706,6 +748,7 @@ function openPipeDetail(rowNumber, keepScroll = false) {
   }).join("");
   $("pipeStages").querySelectorAll(".date-field").forEach(field => { syncDateField(field); field.querySelector("input").dataset.initial = field.querySelector("input").value; });
   $("pipeFormError").hidden = true; $("savePipeButton").hidden = done; $("savePipeButton").disabled = true; $("savePipeButton").textContent = "Save Changes";
+  $("pipeStatusButton").hidden = card.group === "failed"; $("pipeFailButton").hidden = card.group !== "ongoing";
   $("pipeStatusButton").innerHTML = done ? svgIcon("undo", 14) + "Reopen" : svgIcon("check-circle", 14) + "Mark as completed";
   if (keepScroll) { $("pipeModal").dataset.dirty = ""; body.scrollTop = top; } else openModal("pipeModal", $("cancelPipeModal"));
 }

@@ -300,6 +300,17 @@ tbody tr:hover .row-action{color:var(--ink-2)}.row-action:hover,tbody tr:hover .
 .pop-option.is-custom{color:var(--brand-ink);font-weight:600;border-top:1px solid var(--line);border-radius:0 0 7px 7px;margin-top:3px}
 .field-help{display:inline-flex;align-items:center;gap:5px}.field-help svg{width:10px;height:10px;flex:none}
 
+/* Offering outcomes: negotiation + failed */
+.k-badges{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}.k-badge{padding:0 7px;border-radius:99px;font-size:10.5px;font-weight:600;line-height:18px;white-space:nowrap}.k-badge.nego{background:var(--amber-bg);color:var(--amber)}.k-badge.retry{background:var(--blue-bg);color:var(--blue)}
+.k-outcomes{display:flex;gap:6px;margin-top:7px}.k-outcomes button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:24px;padding:0 6px;border:1px solid var(--line-2);border-radius:7px;background:none;color:var(--muted);font-size:11px;font-weight:600;white-space:nowrap}.k-outcomes svg{width:11px;height:11px}
+.k-outcomes button:hover{border-color:var(--amber);background:var(--amber-bg);color:var(--amber)}.k-outcomes button.danger:hover{border-color:var(--red);background:var(--red-bg);color:var(--red)}
+.pop-sep{height:1px;margin:4px 6px;background:var(--line)}.stage-menu .pop-option.is-danger{color:var(--red)}.stage-menu .pop-option.is-danger:hover{background:var(--red-bg);color:var(--red)}
+.pipe-list{flex:1;min-height:0;display:flex;padding:0;overflow:hidden}.pipe-list .table-scroll{flex:1;min-height:0;border-radius:0}td.cell-note{max-width:380px;overflow:hidden;text-overflow:ellipsis}
+.modal-icon.danger{background:var(--red-bg);color:var(--red)}.modal-icon.amber{background:var(--amber-bg);color:var(--amber)}
+.field textarea{width:100%;min-height:76px;padding:9px 12px;border:1px solid var(--line-2);border-radius:var(--r-s);background:var(--solid);color:var(--ink);outline:0;font:inherit;font-size:13px;line-height:1.5;resize:vertical;transition:border-color .18s,box-shadow .18s}.field textarea::placeholder{color:var(--faint)}.field textarea:hover{border-color:var(--brand-line)}.field textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.text-button.danger{color:var(--red)}.text-button.danger:hover{background:var(--red-bg)}.modal-hint:has(button){display:flex;align-items:center;gap:6px}
+.info-grid dd.is-multiline{white-space:pre-line;font-weight:400;font-size:12.5px;line-height:1.55}.unsent-row small.is-retry{color:var(--amber)}
+
 /* ---------- Responsive ---------- */
 @media(max-width:1050px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-grid{grid-template-columns:1fr}.data-toolbar .search-box{width:240px}}
 @media(max-width:720px){.login-shell{grid-template-columns:1fr;padding:10px}.login-aside{display:none}.login-card{min-height:calc(100vh - 20px)}

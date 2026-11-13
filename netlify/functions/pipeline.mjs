@@ -7,6 +7,10 @@ import { readManyTabsFromSpreadsheet, getSheetRowFormulas, getSheetCrudMetadata,
 const MAIN_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2zaUJf_CW2VYk";
 const TAB = "2026 Rec Pipeline", HEADER_ROW = 1, DATA_START = 2, START = "A", END = "AI";
 const STATUS = { header:"RFP Process", fallback:"Q" };
+// Candidate outcome for the row. "Failed" here means this candidate dropped out; the row stays as history.
+const OUTCOME = { header:"Status", fallback:"AG" };
+export const isFailed = v => /fail|gagal/i.test(String(v ?? ""));
+const NEGO_TAG = "Nego", FAIL_TAG = "Failed";
 // Formula columns of the pipeline tab (same list as data.mjs); copied down when a row is created.
 const FORMULA_COLUMNS = ["A","B","C","R","Y","Z","AA","AB","AC","AF","AH"];
 // RFP intake tab. Its formula columns are never copied into the pipeline.
@@ -40,6 +44,7 @@ function resolveColumns(headers){
   const find = (header, fallback) => { const i = headers.findIndex(h => norm(h) === norm(header)); return i > -1 ? i : (fallback ? colIndex(fallback) : -1); };
   return {
     status: find(STATUS.header, STATUS.fallback),
+    outcome: find(OUTCOME.header, OUTCOME.fallback),
     info: Object.fromEntries(Object.entries(INFO).map(([key, header]) => [key, find(header)])),
     stages: STAGES.map(stage => ({ ...stage, columns: stage.columns.map(c => ({ ...c, index: find(c.header, c.fallback) })) }))
   };
@@ -55,34 +60,38 @@ async function readTab(forceRefresh){
   const records = values.slice(DATA_START - HEADER_ROW).map((row, i) => ({ row, rowNumber: DATA_START + i })).filter(r => filled(r.row[cols.info.code]) || filled(r.row[cols.info.position]));
   return { headers, cols, records, values, rfp: { headers: rfpHeaders, rows: rfpRows, col: rfpCol } };
 }
-// Pick the spelling the sheet already uses for "ongoing"/"completed": dropdown options first, then existing rows.
-async function statusValueFor(wanted, cols, records){
+// Pick the spelling the sheet already uses for a value in one column: dropdown options first, then existing rows.
+async function sheetValueFor(columnIndex, matches, records){
   let value = "";
-  try { const metaInfo = await getSheetCrudMetadata(MAIN_ID, TAB, HEADER_ROW, DATA_START, START, END); value = (metaInfo.columns?.[cols.status]?.validation?.options || []).map(String).find(o => statusGroup(o) === wanted) || ""; } catch { /* fall back to values already used in the column */ }
-  if (!value) { const seen = new Map(); for (const r of records) { const v = String(r.row[cols.status] ?? "").trim(); if (statusGroup(v) === wanted) seen.set(v, (seen.get(v) || 0) + 1); } value = [...seen.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ""; }
+  try { const metaInfo = await getSheetCrudMetadata(MAIN_ID, TAB, HEADER_ROW, DATA_START, START, END); value = (metaInfo.columns?.[columnIndex]?.validation?.options || []).map(String).find(matches) || ""; } catch { /* fall back to values already used in the column */ }
+  if (!value) { const seen = new Map(); for (const r of records) { const v = String(r.row[columnIndex] ?? "").trim(); if (matches(v)) seen.set(v, (seen.get(v) || 0) + 1); } value = [...seen.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] || ""; }
   return value;
 }
-// Send one RFP from the intake tab into the pipeline tab as a new row.
-async function sendToPipeline(actor, body){
-  const rfpRow = Number(body.rfpRowNumber), code = String(body.code ?? "").trim();
-  if (!Number.isInteger(rfpRow) || rfpRow < RFP.dataStart || rfpRow > 10000 || !code) return json(400, { error:"Invalid RFP row." });
-  const { headers, cols, records, values, rfp } = await readTab(true);
-  const source = rfp.rows.find(r => r.rowNumber === rfpRow);
-  if (!source || String(source.row[rfp.col("RFP Code")] ?? "").trim() !== code) return json(409, { error:"This row no longer matches the RFP you selected (the sheet was changed). Refresh and try again." });
-  const existing = records.find(r => String(r.row[cols.info.code] ?? "").trim() === code);
-  if (existing) return json(409, { error:`${code} is already in ${TAB} (row ${existing.rowNumber}).`, rowNumber: existing.rowNumber });
+const statusValueFor = (wanted, cols, records) => sheetValueFor(cols.status, v => statusGroup(v) === wanted, records);
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const tagDate = iso => `${Number(iso.slice(8, 10))} ${MONTHS_SHORT[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
+// Adds one dated line to Remarks, keeping whatever is already there.
+function remarksWrite(cols, rowNumber, live, line){
+  const index = cols.info.remarks; if (index < 0) throw new Error(`Column "Remarks" was not found in ${TAB}.`);
+  const current = String(live[index] ?? "").trim(), text = current ? `${current}\n${line}` : line;
+  return { range:`${quoted}!${colLetter(index)}${rowNumber}`, values:[[text.startsWith("=") ? "'" + text : text]] };
+}
+// Creates one pipeline row for `code` below the last record. `valueOf(header)` supplies the value for each shared column.
+// Returns { rowNumber } on success or { status, error } when refused; a refusal leaves the tab as it was.
+async function createPipelineRow(code, valueOf, tabData){
+  const { headers, cols, records, values, rfp } = tabData;
   const ongoing = await statusValueFor("ongoing", cols, records);
-  if (cols.status > -1 && !ongoing) return json(422, { error:`No "ongoing" value was found in the ${STATUS.header} dropdown or in existing rows, so the app will not guess one. Set it once in the sheet and try again.` });
+  if (cols.status > -1 && !ongoing) return { status:422, error:`No "ongoing" value was found in the ${STATUS.header} dropdown or in existing rows, so the app will not guess one. Set it once in the sheet and try again.` };
   // A row is free when every non-formula cell in A:AI is empty, so a notes or total row is never written over.
   const formulaIndexes = new Set(FORMULA_COLUMNS.map(colIndex));
   const rowIsFree = n => (values[n - HEADER_ROW] || []).every((v, i) => formulaIndexes.has(i) || String(v ?? "").trim() === "");
   // Always append below the last existing record; an empty row in the middle of the data is never reused.
   let rowNumber = records.reduce((max, r) => Math.max(max, r.rowNumber), DATA_START - 1) + 1; while (rowNumber <= 10000 && !rowIsFree(rowNumber)) rowNumber++;
-  if (rowNumber > 10000) return json(400, { error:"No free row was found in the pipeline tab." });
+  if (rowNumber > 10000) return { status:400, error:"No free row was found in the pipeline tab." };
   const metaInfo = await getSheetCrudMetadata(MAIN_ID, TAB, HEADER_ROW, DATA_START, START, END);
   // Preparing the row (formulas) happens before any value is written, so a failure here leaves the data untouched.
   let merges = [];
-  // Remember which formula cells were empty beforehand, so a refused send can put the row back exactly as it was.
+  // Remember which formula cells were empty beforehand, so a refused request can put the row back exactly as it was.
   let before = []; try { before = await getSheetRowFormulas(MAIN_ID, TAB, rowNumber, START, END); } catch { before = []; }
   const undoFormulas = async () => { const ranges = FORMULA_COLUMNS.filter(letter => String(before[colIndex(letter)] ?? "") === "").map(letter => `${quoted}!${letter}${rowNumber}`); if (ranges.length) { try { await clearSheetValues(MAIN_ID, ranges); } catch { /* best effort */ } } };
   try {
@@ -92,34 +101,48 @@ async function sendToPipeline(actor, body){
   } catch (error) {
     const inRow = merges.filter(m => rowNumber - 1 >= m.startRowIndex && rowNumber - 1 < m.endRowIndex && m.startColumnIndex <= colIndex(END)).map(mergeLabel);
     const message = String(error.message || "unknown error");
-    return json(409, { error: /Nothing was written/.test(message) ? message : `Could not prepare row ${rowNumber} of ${TAB}: ${message}${inRow.length ? ` Merged cells in that row: ${inRow.join(", ")}.` : ""} Nothing was written.` });
+    return { status:409, error: /Nothing was written/.test(message) ? message : `Could not prepare row ${rowNumber} of ${TAB}: ${message}${inRow.length ? ` Merged cells in that row: ${inRow.join(", ")}.` : ""} Nothing was written.` };
   }
   // A value written into a merged cell that is not the merge's top-left cell is silently dropped by Sheets, so refuse instead.
   const dropped = col => { const m = mergeAt(merges, rowNumber - 1, col); return m && (m.startRowIndex !== rowNumber - 1 || m.startColumnIndex !== col) ? m : null; };
   const formulas = await getSheetRowFormulas(MAIN_ID, TAB, rowNumber, START, END);
-  // Copy every RFP column that has a same-named, non-formula column in the pipeline tab.
+  // Fill every column the RFP tab and the pipeline tab share by name, skipping formula columns on either side.
   const rfpFormula = new Set(RFP.formulaColumns.map(colIndex)), writes = [], blocked = [];
   rfp.headers.forEach((header, i) => {
     if (!header || rfpFormula.has(i)) return; const target = headers.findIndex(h => norm(h) === norm(header));
-    if (target < 0 || target === cols.status || isFormula(formulas[target]) || FORMULA_COLUMNS.includes(colLetter(target))) return;
-    const value = String(source.row[i] ?? "").trim(); if (value && dropped(target)) blocked.push(`${header} (${mergeLabel(dropped(target))})`); else if (value) writes.push({ range:`${quoted}!${colLetter(target)}${rowNumber}`, values:[[value.startsWith("=") ? "'" + value : value]] });
+    if (target < 0 || target === cols.status || target === cols.outcome || isFormula(formulas[target]) || FORMULA_COLUMNS.includes(colLetter(target))) return;
+    const value = String(valueOf(header, target) ?? "").trim(); if (value && dropped(target)) blocked.push(`${header} (${mergeLabel(dropped(target))})`); else if (value) writes.push({ range:`${quoted}!${colLetter(target)}${rowNumber}`, values:[[value.startsWith("=") ? "'" + value : value]] });
   });
   if (cols.status > -1 && !isFormula(formulas[cols.status])) writes.push({ range:`${quoted}!${colLetter(cols.status)}${rowNumber}`, values:[[ongoing]] });
   // If RFP Code is not a formula in the new row, carry the existing code over as text (it is never generated here).
   if (!isFormula(formulas[cols.info.code])) writes.push({ range:`${quoted}!${colLetter(cols.info.code)}${rowNumber}`, values:[[code]] });
-  if (blocked.length) await undoFormulas();
-  if (blocked.length) return json(409, { error:`Row ${rowNumber} of ${TAB} has merged cells that would swallow these values: ${blocked.join(", ")}. Unmerge them in the sheet, then try again. Nothing was written.` });
-  if (!writes.length) return json(400, { error:"No matching columns were found between the RFP tab and the pipeline tab." });
+  if (blocked.length) { await undoFormulas(); return { status:409, error:`Row ${rowNumber} of ${TAB} has merged cells that would swallow these values: ${blocked.join(", ")}. Unmerge them in the sheet, then try again. Nothing was written.` }; }
+  if (!writes.length) { await undoFormulas(); return { status:400, error:"No matching columns were found between the RFP tab and the pipeline tab." }; }
   await writeSheetValues(MAIN_ID, writes);
   // Safety check: the new row must resolve to this RFP's code. If the sheet's formula says otherwise, undo and report.
   const after = String((await readLiveRow(rowNumber))[cols.info.code] ?? "").trim();
   if (after !== code) {
     await clearSheetValues(MAIN_ID, writes.map(w => w.range)); await undoFormulas();
-    return json(409, { error:`Not sent. The new pipeline row (row ${rowNumber}) showed RFP Code "${after || "empty"}" instead of "${code}", so the row was emptied again. The RFP Code formula in ${TAB} needs a row in a specific position; add this one in the sheet.` });
+    return { status:409, error:`The new pipeline row (row ${rowNumber}) showed RFP Code "${after || "empty"}" instead of "${code}", so the row was emptied again. The RFP Code formula in ${TAB} needs a row in a specific position; add this one in the sheet.` };
   }
-  await logActivity(actor, code, `${code}: sent to pipeline (row ${rowNumber})`);
-  return json(201, { success:true, rowNumber, code });
+  return { rowNumber };
 }
+// Send one RFP from the intake tab into the pipeline tab as a new row.
+async function sendToPipeline(actor, body){
+  const rfpRow = Number(body.rfpRowNumber), code = String(body.code ?? "").trim();
+  if (!Number.isInteger(rfpRow) || rfpRow < RFP.dataStart || rfpRow > 10000 || !code) return json(400, { error:"Invalid RFP row." });
+  const tabData = await readTab(true), { cols, records, rfp } = tabData;
+  const source = rfp.rows.find(r => r.rowNumber === rfpRow);
+  if (!source || String(source.row[rfp.col("RFP Code")] ?? "").trim() !== code) return json(409, { error:"This row no longer matches the RFP you selected (the sheet was changed). Refresh and try again." });
+  // A row whose candidate failed is history; only a live row blocks sending the same RFP again.
+  const existing = records.find(r => String(r.row[cols.info.code] ?? "").trim() === code && !isFailed(r.row[cols.outcome]));
+  if (existing) return json(409, { error:`${code} is already in ${TAB} (row ${existing.rowNumber}).`, rowNumber: existing.rowNumber });
+  const created = await createPipelineRow(code, header => source.row[rfp.col(header)], tabData);
+  if (created.error) return json(created.status, { error: /^Could not|^Row |^No /.test(created.error) ? created.error : `Not sent. ${created.error}` });
+  await logActivity(actor, code, `${code}: sent to pipeline (row ${created.rowNumber})`);
+  return json(201, { success:true, rowNumber: created.rowNumber, code });
+}
+
 async function readLiveRow(rowNumber){
   const data = await readManyTabsFromSpreadsheet(MAIN_ID, [{ key:"row", title:TAB, headerRow:rowNumber, endRow:rowNumber, startColumn:START, endColumn:END }], { forceRefresh:true });
   return data.get("row")?.values?.[0] || [];
@@ -141,8 +164,11 @@ export const handler = async event => {
       const iso = (row, index) => index < 0 ? "" : toIsoDate(row[index], meta[index]?.dateOrder);
       const text = (row, index) => index < 0 ? "" : String(row[index] ?? "").trim();
       const today = Date.now(), counts = new Map(), cards = [];
+      // Earlier candidates that failed for the same RFP, and the codes that still have a live row.
+      const failedByCode = new Map(), liveCodes = new Set();
+      for (const { row } of records) { const c = text(row, cols.info.code); if (!c) continue; if (isFailed(text(row, cols.outcome))) failedByCode.set(c, (failedByCode.get(c) || 0) + 1); else liveCodes.add(c); }
       for (const { row, rowNumber } of records) {
-        const status = text(row, cols.status), group = statusGroup(status);
+        const status = text(row, cols.status), outcome = text(row, cols.outcome), failed = isFailed(outcome), group = failed ? "failed" : statusGroup(status);
         counts.set(status, (counts.get(status) || 0) + 1);
         if (group === "other") continue;
         const stages = {}; let current = null;
@@ -154,15 +180,18 @@ export const handler = async event => {
         }
         const receivedIso = iso(row, cols.info.received);
         const info = Object.fromEntries(Object.keys(INFO).map(key => [key, text(row, cols.info[key])]));
-        cards.push({ rowNumber, ...info, receivedIso, hiringDateIso: iso(row, cols.info.hiringDate), status, group, stage: current, stages,
+        const remarkLines = info.remarks.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+        cards.push({ rowNumber, ...info, receivedIso, hiringDateIso: iso(row, cols.info.hiringDate), status, outcome, group, stage: current, stages,
+          negotiations: remarkLines.filter(x => x.startsWith(`[${NEGO_TAG} `)).length, lastNote: remarkLines[remarkLines.length - 1] || "",
+          failedBefore: group === "failed" ? 0 : (failedByCode.get(info.code) || 0),
           daysOpen: receivedIso ? Math.max(0, Math.floor((today - Date.parse(receivedIso + "T00:00:00Z")) / 86400000)) : null });
       }
       return json(200, {
         tab: TAB, statusHeader: STATUS.header,
         stages: cols.stages.map(s => ({ key:s.key, label:s.label, mode:s.mode, source:s.source || null, column: s.columns[0].index > -1 ? colLetter(s.columns[0].index) : null })),
-        cards, codes: records.map(r => text(r.row, cols.info.code)).filter(Boolean),
+        cards, codes: [...liveCodes], outcomeHeader: OUTCOME.header,
         // RFPs in the intake tab that have no row in the pipeline tab yet.
-        unsent: (() => { const inPipeline = new Set(records.map(r => text(r.row, cols.info.code))); const get = (row, name) => { const i = rfp.col(name); return i < 0 ? "" : String(row[i] ?? "").trim(); }; return rfp.rows.filter(r => !inPipeline.has(get(r.row, "RFP Code"))).map(r => ({ rowNumber: r.rowNumber, code: get(r.row, "RFP Code"), position: get(r.row, "Position"), businessUnit: get(r.row, "Business Unit"), received: get(r.row, "RFP Received") })).reverse(); })(),
+        unsent: (() => { const inPipeline = liveCodes; const get = (row, name) => { const i = rfp.col(name); return i < 0 ? "" : String(row[i] ?? "").trim(); }; return rfp.rows.filter(r => !inPipeline.has(get(r.row, "RFP Code"))).map(r => ({ rowNumber: r.rowNumber, code: get(r.row, "RFP Code"), position: get(r.row, "Position"), businessUnit: get(r.row, "Business Unit"), received: get(r.row, "RFP Received"), failedBefore: failedByCode.get(get(r.row, "RFP Code")) || 0 })).reverse(); })(),
         rfpTab: RFP.tab, statusValues: [...counts.entries()].map(([value, count]) => ({ value, count, group: statusGroup(value) })).sort((a, b) => b.count - a.count),
         checkedAt: new Date().toISOString()
       });
@@ -184,6 +213,7 @@ export const handler = async event => {
     if (event.httpMethod === "PATCH") {
       // Set or clear stage dates: { values: { first:"2026-11-13", offerIn:"" } }
       if (statusGroup(liveStatus) === "completed") return json(409, { error:"This request is already completed. Reopen it before changing its stages." });
+      if (isFailed(live[cols.outcome])) return json(409, { error:"This candidate is marked as failed, so the row is kept as history and its stages cannot be changed." });
       const entries = Object.entries(body.values || {});
       if (!entries.length) return json(400, { error:"No stage changes were submitted." });
       const writes = [], clears = [];
@@ -204,6 +234,36 @@ export const handler = async event => {
       const after = cols.stages.filter(s => { const v = body.values?.[s.key]; return v !== undefined ? !!String(v).trim() : s.columns.some(c => !c.detailOnly && filled(live[c.index])); }).pop();
       await logActivity(actor, code, `${code}: stage set to ${after ? after.label : "Sourcing"}`);
       return json(200, { success:true, rowNumber, stage: after ? after.key : null });
+    }
+
+    if (body.action === "negotiate" || body.action === "fail") {
+      const note = String(body.note ?? "").trim().replace(/\s+/g, " "), date = String(body.date ?? "").trim();
+      if (!note) return json(400, { error: body.action === "fail" ? "Enter the reason." : "Enter a short note about the negotiation." });
+      if (note.length > 500) return json(400, { error:"Keep the note under 500 characters." });
+      if (!validIso(date)) return json(400, { error:"Pick a valid date." });
+      if (isFailed(live[cols.outcome])) return json(409, { error:"This candidate is already marked as failed." });
+      if (statusGroup(liveStatus) === "completed") return json(409, { error:"This request is already completed." });
+      const stageNow = cols.stages.filter(s => s.columns.some(c => !c.detailOnly && filled(live[c.index]))).pop();
+      if (body.action === "negotiate") {
+        // Renegotiation: the card stays where it is; one dated line is added to Remarks.
+        await writeSheetValues(MAIN_ID, [remarksWrite(cols, rowNumber, live, `[${NEGO_TAG} ${tagDate(date)}] ${note}`)]);
+        await logActivity(actor, code, `${code}: negotiation noted`);
+        return json(200, { success:true, rowNumber });
+      }
+      // Failed: this row becomes history (candidate, dates and reason stay), and optionally a new row continues the RFP.
+      if (cols.outcome < 0) return json(400, { error:`Column "${OUTCOME.header}" was not found in ${TAB}.` });
+      if (isFormula(formulas[cols.outcome])) return json(409, { error:`${OUTCOME.header} (column ${colLetter(cols.outcome)}) is calculated by a formula in this row and cannot be set from here.` });
+      const failedValue = await sheetValueFor(cols.outcome, isFailed, records);
+      if (!failedValue) return json(422, { error:`No "Failed" value was found in the ${OUTCOME.header} dropdown or in existing rows, so the app will not guess one. Set it once in the sheet and try again.` });
+      await writeSheetValues(MAIN_ID, [{ range:`${quoted}!${colLetter(cols.outcome)}${rowNumber}`, values:[[failedValue]] }, remarksWrite(cols, rowNumber, live, `[${FAIL_TAG} ${tagDate(date)} · ${stageNow ? stageNow.label : "Sourcing"}] ${note}`)]);
+      await logActivity(actor, code, `${code}: candidate marked ${failedValue} at ${stageNow ? stageNow.label : "Sourcing"}`);
+      if (!body.continue) return json(200, { success:true, rowNumber, value: failedValue, newRow: null });
+      // Continue the same RFP with the next candidate: a fresh row carrying the request details, no candidate, no stage dates.
+      const tabData = await readTab(true);
+      const created = await createPipelineRow(code, (header, target) => live[target], tabData);
+      if (created.error) return json(200, { success:true, rowNumber, value: failedValue, newRow: null, warning:`The candidate was marked ${failedValue}, but the new row for the next candidate was not created. ${created.error}` });
+      await logActivity(actor, code, `${code}: new row ${created.rowNumber} for the next candidate`);
+      return json(200, { success:true, rowNumber, value: failedValue, newRow: created.rowNumber });
     }
 
     // POST { action: "complete" | "reopen" } switches the status column, reusing a spelling the sheet already uses.

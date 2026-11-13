@@ -80,3 +80,13 @@ Defined in `netlify/functions/_lib/presets.mjs` and applied to `RFP 2026` and `2
 - If a send is refused after the row was prepared, the values are cleared and formula cells that were empty before are cleared again, leaving the row as it was.
 - Kanban moves write one date cell (U, V, W, X or AD), clear later date cells on a backward move, and Complete/Reopen writes one cell in Q.
 - Values are entered with `USER_ENTERED`, so how a date looks depends on the format of the cell it lands in.
+
+## Offering outcomes: negotiation and failed candidates
+- A candidate outcome is read from the `Status` column (AG). A row whose Status reads as failed (`Failed`, `Gagal`) is history: it leaves the board and appears in the Failed list, with its candidate, stage dates and reason intact, and can no longer be edited from the app.
+- Negotiation: `POST pipeline` `{ action:"negotiate", rowNumber, code, note, date }` appends `[Nego 13 Nov 2026] note` as a new line in Remarks. The card stays in its stage and shows a Negotiating badge while it is in Offering In.
+- Failed: `POST pipeline` `{ action:"fail", rowNumber, code, note, date, continue }` sets Status to the sheet's own spelling of Failed (dropdown option, or the spelling used in existing rows; the app refuses if neither exists) and appends `[Failed 13 Nov 2026 · Offering In] reason` to Remarks.
+- With `continue: true` a new row is added below the last record for the same RFP Code: request details copied from the failed row (RFP Received through Initiator), `RFP Process` ongoing, no candidate and no stage dates. It appears under Sourcing with a "Candidate #2" badge. If the new row cannot be created, the failed mark is kept and a warning explains why.
+- Without `continue`, the RFP shows up in the "RFPs not in pipeline" list so it can be sent again later.
+- Send to pipeline now refuses a duplicate only when the RFP already has a row that is not failed.
+- On Offering In cards the two outcomes are buttons on the card (Negotiating, Declined). At any other stage they are in the `...` menu, and Mark as failed is also in the card details.
+- There is no undo for a failed mark in the app. To reverse one, clear the Status cell in the sheet and delete the extra row if one was created.
