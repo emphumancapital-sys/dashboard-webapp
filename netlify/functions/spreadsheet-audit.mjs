@@ -58,10 +58,12 @@ function compactValidation(rule) {
 
 export const handler = async event => {
   if (event.httpMethod !== "GET") return json(405, { error: "Method not allowed." });
+  let auditStage = "authentication";
   try {
     const actor = await requireAdmin(event);
     if (!actor) return json(401, { error: "Admin authentication required." });
 
+    auditStage = "spreadsheet metadata request";
     const sheets = getClient();
     const metadataResponse = await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID,
@@ -95,6 +97,7 @@ export const handler = async event => {
 
     // Request only formulas and validation metadata. Literal cell contents (including employee data)
     // are deliberately excluded from the audit export.
+    auditStage = "grid metadata and formula scan";
     const gridResponse = ranges.length ? await sheets.spreadsheets.get({
       spreadsheetId: SPREADSHEET_ID,
       ranges,
@@ -177,6 +180,7 @@ export const handler = async event => {
     }
 
     const validationSourceValues = [];
+    auditStage = "dropdown source range values";
     for (const range of [...validationSourceRanges].slice(0, 100)) {
       try {
         const response = await sheets.spreadsheets.values.get({
@@ -233,9 +237,27 @@ export const handler = async event => {
     return json(200, report, { "Content-Disposition": 'attachment; filename="emp-hcs-spreadsheet-audit.json"' });
   } catch (error) {
     const status = Number(error?.code || error?.response?.status);
+    const apiErrors = error?.response?.data?.error?.errors || [];
     const message = status === 403
       ? "Google Sheets API access denied. Check that the Netlify service account has access to the spreadsheet."
       : (error.message || "Spreadsheet audit failed.");
-    return json(status === 403 ? 403 : 500, { error: message });
+    console.error("EMP spreadsheet audit failed", {
+      stage: auditStage,
+      status: status || null,
+      message,
+      apiErrors,
+      errors: error?.errors || null
+    });
+    return json(status === 403 ? 403 : 500, {
+      error: message,
+      stage: auditStage,
+      status: status || null,
+      details: apiErrors.map(item => ({
+        reason: item.reason || null,
+        message: item.message || null,
+        location: item.location || null,
+        locationType: item.locationType || null
+      }))
+    });
   }
 };
