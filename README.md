@@ -84,3 +84,12 @@ See `docs/data-schema.md` and `docs/data-integration.md` for exact workbook tabs
 ## Spreadsheet CRUD
 
 The Data page supports Admin-only create, update, and safe clear operations for configured sources. Validation and formula metadata are loaded from Google Sheets. The MCU Induction source is restricted to column A (`RFP Received`); imported columns B:H are read-only. Ensure the service account has Editor permission before testing writes. Use a duplicate workbook for initial write verification.
+
+## Navigation and Organization Master
+
+- Navigation is grouped into **Menu** (Overview, Hiring Pipeline) and **Master Data** (Organization plus existing business data pages). Existing user-facing page labels are preserved; Google Sheets tab names remain internal source identifiers.
+- Organization Management is Admin-only and manages Department, Business Unit, and Position values in the hidden `EMP Organization Master` sheet.
+- The Organization endpoint is protected by the server-side Admin role check. Records can be added, renamed, activated, or deactivated; deactivation is preferred over physical deletion to preserve historical references.
+- On organization changes, the backend refreshes the hidden `EMP Organization Lists` helper sheet and applies Google Sheets dropdown validation to matching Department, Business Unit, and Position columns in the configured visible business tabs.
+- Matching form fields also load active Organization values dynamically. Existing records are not automatically renamed when a master value changes.
+- Hiring Pipeline is currently a navigation/page placeholder only. Its workflow stages and data behavior are intentionally not implemented until the user defines the process.

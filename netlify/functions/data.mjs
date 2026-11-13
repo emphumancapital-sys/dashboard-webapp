@@ -112,7 +112,7 @@ export const handler = async event => {
     }
 
     if(event.httpMethod==="GET"){
-      const data=await readTabFromSpreadsheet(MAIN_ID,source.tab,source.headerRow,source.dataStartRow,params.page,params.pageSize,params.search,{startColumn:source.startColumn,endColumn:source.endColumn,identityColumns:source.identityColumns,forceRefresh:params.refresh==="1"});
+      const data=await readTabFromSpreadsheet(MAIN_ID,source.tab,source.headerRow,source.dataStartRow,params.page,params.pageSize,params.search,{startColumn:source.startColumn,endColumn:source.endColumn,identityColumns:source.identityColumns,forceRefresh:params.refresh==="1",sortColumn:params.sort,sortDir:params.dir});
       return json(200,{source:publicSource(source),...data,checkedAt:new Date().toISOString(),readOnly:source.accessMode==="view_only"});
     }
 

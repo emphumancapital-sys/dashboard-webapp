@@ -201,6 +201,79 @@ export async function readManyTabsFromSpreadsheet(spreadsheetId,tabs,{forceRefre
   return result;
 }
 
+// ---- Sorting helpers: type-aware so dates and numbers sort by value, not by text ----
+const MONTHS={jan:0,january:0,januari:0,feb:1,february:1,februari:1,mar:2,march:2,maret:2,apr:3,april:3,may:4,mei:4,jun:5,june:5,juni:5,jul:6,july:6,juli:6,aug:7,august:7,agu:7,agt:7,agustus:7,sep:8,sept:8,september:8,oct:9,october:9,okt:9,oktober:9,nov:10,november:10,dec:11,december:11,des:11,desember:11};
+function fullYear(y){y=Number(y);return y<100?(y<70?2000+y:1900+y):y;}
+function utc(y,m,d){const t=Date.UTC(y,m,d);const x=new Date(t);return x.getUTCFullYear()===y&&x.getUTCMonth()===m&&x.getUTCDate()===d?t:null;}
+// Returns {t, a, b} where a/b are the first two numeric parts of an ambiguous d/m/y value.
+function parseDateParts(value){
+  const s=String(value??"").trim();if(!s||s.length>40)return null;
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/);
+  if(m){const t=utc(+m[1],+m[2]-1,+m[3]);return t===null?null:{t};}
+  m=s.match(/^(?:[A-Za-z]+,?\s+)?(\d{1,2})[\s\-\/.]([A-Za-z]{3,9})[\s\-\/.,]+(\d{2,4})$/);
+  if(m&&MONTHS[m[2].toLowerCase()]!==undefined){const t=utc(fullYear(m[3]),MONTHS[m[2].toLowerCase()],+m[1]);return t===null?null:{t};}
+  m=s.match(/^(?:[A-Za-z]+,?\s+)?([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})$/);
+  if(m&&MONTHS[m[1].toLowerCase()]!==undefined){const t=utc(fullYear(m[3]),MONTHS[m[1].toLowerCase()],+m[2]);return t===null?null:{t};}
+  m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s.*)?$/);
+  if(m)return {a:+m[1],b:+m[2],y:fullYear(m[3])};
+  return null;
+}
+function resolveDate(parts,order){
+  if(!parts)return null;if(parts.t!==undefined)return parts.t;
+  return order==="dmy"?utc(parts.y,parts.b-1,parts.a):utc(parts.y,parts.a-1,parts.b);
+}
+function parseNumberLoose(value){
+  let s=String(value??"").trim();if(!s||s.length>30)return null;
+  let negative=false;if(/^\(.*\)$/.test(s)){negative=true;s=s.slice(1,-1);}
+  s=s.replace(/^(rp\.?|idr|usd|\$|€|£)\s*/i,"").replace(/\s/g,"");
+  if(s.startsWith("-")){negative=!negative;s=s.slice(1);}
+  if(!/^\d[\d.,]*$/.test(s))return null;
+  const dot=s.lastIndexOf("."),comma=s.lastIndexOf(",");
+  if(dot>-1&&comma>-1)s=dot>comma?s.replace(/,/g,""):s.replace(/\./g,"").replace(",",".");
+  else if(comma>-1)s=/^\d{1,3}(,\d{3})+$/.test(s)?s.replace(/,/g,""):s.replace(",",".");
+  else if(dot>-1&&/^\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,"");
+  const n=Number(s);return Number.isFinite(n)?(negative?-n:n):null;
+}
+// Decide per column whether it holds dates, numbers or text (80% of non-empty values must agree).
+function inferColumnMeta(records,width){
+  const meta=[];
+  for(let i=0;i<width;i++){
+    let filled=0,dates=0,numbers=0,dayFirst=0,monthFirst=0;
+    for(const record of records){
+      const v=record.row[i];if(v===undefined||v===null||v==="")continue;
+      filled++;
+      const parts=parseDateParts(v);
+      if(parts){dates++;if(parts.t===undefined){if(parts.a>12)dayFirst++;else if(parts.b>12)monthFirst++;}}
+      else if(parseNumberLoose(v)!==null)numbers++;
+    }
+    if(filled&&dates/filled>=0.8)meta.push({type:"date",dateOrder:monthFirst>dayFirst?"mdy":"dmy"}); // ambiguous values: day-first, as in dashboard.mjs
+    else if(filled&&numbers/filled>=0.8)meta.push({type:"number"});
+    else meta.push({type:"text"});
+  }
+  return meta;
+}
+const textCollator=new Intl.Collator(undefined,{numeric:true,sensitivity:"base"});
+function sortRecords(records,position,dir,meta){
+  const sign=dir==="asc"?1:-1;
+  if(position===null){records.sort((x,y)=>sign*(x.rowNumber-y.rowNumber));return;}
+  const info=meta[position]||{type:"text"};
+  const keyOf=v=>{
+    if(v===undefined||v===null||v==="")return null;
+    if(info.type==="date")return resolveDate(parseDateParts(v),info.dateOrder);
+    if(info.type==="number")return parseNumberLoose(v);
+    return String(v);
+  };
+  const keyed=records.map(record=>({record,key:keyOf(record.row[position])}));
+  keyed.sort((x,y)=>{
+    // Empty or unparseable values always sink to the bottom, whatever the direction.
+    if(x.key===null&&y.key===null)return y.record.rowNumber-x.record.rowNumber;
+    if(x.key===null)return 1;if(y.key===null)return -1;
+    const c=info.type==="text"?textCollator.compare(x.key,y.key):x.key-y.key;
+    return c?sign*c:y.record.rowNumber-x.record.rowNumber;
+  });
+  keyed.forEach((item,index)=>{records[index]=item.record;});
+}
+
 export async function readTabFromSpreadsheet(spreadsheetId,title,headerRow=1,dataStartRow=headerRow+1,page=1,pageSize=50,search="",rangeOptions={}){
   if(!spreadsheetId||!title)throw new Error("Spreadsheet ID and tab name are required.");
   const tab={title,headerRow,startColumn:rangeOptions.startColumn||"A",endColumn:rangeOptions.endColumn||"ZZ"};
@@ -243,6 +316,13 @@ export async function readTabFromSpreadsheet(spreadsheetId,title,headerRow=1,dat
   let records=candidateRecords.map(record=>({row:keep.map(i=>record.row[i]??""),rowNumber:record.rowNumber}));
   const q=String(search||"").trim().toLocaleLowerCase();
   if(q)records=records.filter(record=>record.row.some(value=>String(value??"").toLocaleLowerCase().includes(q)));
+  // Column types are inferred from every record (not just the current page or search result).
+  const columnMeta=inferColumnMeta(candidateRecords.map(record=>({row:keep.map(i=>record.row[i]??"")})),keep.length);
+  // Default order: latest sheet row first. sortColumn is the original sheet column index.
+  const sortIndex=rangeOptions.sortColumn===undefined||rangeOptions.sortColumn===null||rangeOptions.sortColumn===""?NaN:Number(rangeOptions.sortColumn);
+  const sortPosition=Number.isInteger(sortIndex)?keep.indexOf(sortIndex):-1;
+  const sortDir=rangeOptions.sortDir==="asc"?"asc":"desc";
+  sortRecords(records,sortPosition>-1?sortPosition:null,sortDir,columnMeta);
   const total=records.length;
   const rows=records.map(record=>record.row);
   const rowNumbers=records.map(record=>record.rowNumber);
@@ -250,7 +330,7 @@ export async function readTabFromSpreadsheet(spreadsheetId,title,headerRow=1,dat
   const totalPages=Math.max(1,Math.ceil(total/safeSize));
   const safePage=Math.min(totalPages,Math.max(1,Number(page)||1));
   const start=(safePage-1)*safeSize;
-  return {headers,columnIndexes:keep,rows:rows.slice(start,start+safeSize),rowNumbers:rowNumbers.slice(start,start+safeSize),total,page:safePage,pageSize:safeSize,totalPages,headerRow,dataStartRow,cacheTtlSeconds:READ_CACHE_TTL_MS/1000};
+  return {headers,columnIndexes:keep,columnMeta,sort:{column:sortPosition>-1?sortIndex:null,dir:sortDir},rows:rows.slice(start,start+safeSize),rowNumbers:rowNumbers.slice(start,start+safeSize),total,page:safePage,pageSize:safeSize,totalPages,headerRow,dataStartRow,cacheTtlSeconds:READ_CACHE_TTL_MS/1000};
 }
 
 

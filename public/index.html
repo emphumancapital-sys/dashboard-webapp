@@ -46,11 +46,17 @@
   <div id="appView" class="app-shell" hidden>
     <aside class="sidebar" id="sidebar">
       <div class="brand"><span class="brand-mark">e</span><div class="brand-copy"><b>emp<span>.</span></b><small>Human Capital Services</small></div></div>
-      <label class="nav-find"><span data-icon="search"></span><input id="navFind" placeholder="Find a sheet" autocomplete="off" aria-label="Find a sheet"><kbd>/</kbd></label>
+      <label class="nav-find"><span data-icon="search"></span><input id="navFind" placeholder="Find a page" autocomplete="off" aria-label="Find a page"><kbd>/</kbd></label>
       <div class="nav-scroll">
-        <button class="nav-item active" data-page="overview" title="Overview"><span class="nav-icon" data-icon="layout-dashboard"></span><span class="nav-label">Overview</span></button>
-        <div id="dataNav" class="source-navigation"></div>
-        <div class="nav-group"><button class="nav-caption" type="button"><span data-icon="chevron-down"></span><span class="cap-label">System management</span></button><div class="nav-items"><div><button class="nav-item" data-page="users" title="User Management"><span class="nav-icon" data-icon="users"></span><span class="nav-label">User Management</span></button></div></div></div>
+        <div class="nav-group"><button class="nav-caption" type="button" aria-expanded="true"><span data-icon="chevron-down"></span><span class="cap-label">Menu</span></button><div class="nav-items"><div>
+          <button class="nav-item active" data-page="overview" title="Overview"><span class="nav-icon" data-icon="layout-dashboard"></span><span class="nav-label">Overview</span></button>
+          <button class="nav-item" data-page="hiring" title="Hiring Pipeline"><span class="nav-icon" data-icon="workflow"></span><span class="nav-label">Hiring Pipeline</span></button>
+        </div></div></div>
+        <div class="nav-group closed" id="masterDataNavGroup"><button class="nav-caption" type="button" aria-expanded="false"><span data-icon="chevron-down"></span><span class="cap-label">Master Data</span></button><div class="nav-items"><div>
+          <button class="nav-item" data-page="organization" title="Organization"><span class="nav-icon" data-icon="building-2"></span><span class="nav-label">Organization</span></button>
+          <div id="dataNav" class="source-navigation"></div>
+        </div></div></div>
+        <div class="nav-group"><button class="nav-caption" type="button" aria-expanded="true"><span data-icon="chevron-down"></span><span class="cap-label">System management</span></button><div class="nav-items"><div><button class="nav-item" data-page="users" title="User Management"><span class="nav-icon" data-icon="users"></span><span class="nav-label">User Management</span></button></div></div></div>
       </div>
       <div class="sidebar-bottom">
         <div class="connection"><span class="status-dot"></span><span>Google Sheets connected</span></div>
@@ -58,7 +64,7 @@
       </div>
     </aside>
     <main class="main">
-      <header class="topbar"><button class="icon-button" id="mobileMenu" aria-label="Toggle sidebar" title="Toggle sidebar"><span data-icon="panel-left"></span></button><div class="breadcrumb"><span>EMP</span><i>/</i><b id="breadcrumbCurrent">Overview</b></div><div class="top-actions"><span id="todayLabel"></span><button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data"><span data-icon="refresh-cw"></span></button><button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Dark mode" title="Light / dark mode"><span class="tt-ico sun" data-icon="sun"></span><span class="tt-ico moon" data-icon="moon"></span><i class="tt-knob"></i></button><div class="top-avatar" id="topInitial">A</div></div></header>
+      <header class="topbar"><button class="icon-button" id="mobileMenu" aria-label="Toggle sidebar" title="Toggle sidebar"><span data-icon="panel-left"></span></button><div class="breadcrumb"><span>EMP</span><i>/</i><b id="breadcrumbCurrent">Overview</b></div><div class="top-actions"><span id="todayLabel"></span><button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data"><span data-icon="rotate-cw"></span></button><button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Dark mode" title="Light / dark mode"><span class="tt-ico sun" data-icon="sun"></span><span class="tt-ico moon" data-icon="moon"></span><i class="tt-knob"></i></button><div class="top-avatar" id="topInitial">A</div></div></header>
       <section class="page active" id="page-overview">
         <div class="page-heading"><div><h1>Overview</h1><p>Your HCS operations at a glance.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Main spreadsheet · Read only</span><span id="lastUpdated">—</span></div></div>
         <div class="metric-grid">
@@ -77,24 +83,84 @@
       </section>
 
       <section class="page" id="page-data">
-        <div class="page-heading"><div><span class="group-chip" id="dataGroup">Data source</span><h1 id="dataTitle">Data</h1><p id="dataSubtitle">Read-only view of the connected Google Sheets source.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Read-only source</span><span id="dataUpdated">—</span></div></div>
-        <div class="data-toolbar"><div class="search-box"><span data-icon="search"></span><input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-source-meta" id="dataSourceMeta"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="primary-button" id="addRecordButton" hidden><span data-icon="plus"></span> Add Record</button><button class="secondary-button" id="dataRefresh"><span data-icon="refresh-cw"></span> Refresh</button></div></div>
-        <section class="panel"><div class="table-scroll data-table-scroll"><table id="sourceTable"><thead id="sourceTableHead"></thead><tbody id="sourceTableBody"><tr><td class="empty-cell">Select a data source.</td></tr></tbody></table></div></section>
-        <div class="data-pagination"><span id="dataPageInfo">—</span><div><button class="secondary-button" id="dataPrev"><span data-icon="chevron-left"></span> Previous</button><button class="secondary-button" id="dataNext">Next <span data-icon="chevron-right"></span></button></div></div>
+        <div class="page-heading">
+          <div><span class="group-chip" id="dataGroup">Data source</span><h1 id="dataTitle">Data</h1><p id="dataSubtitle">Connected Google Sheets source.</p></div>
+          <div class="heading-actions"><span class="mode-pill" id="dataMode" hidden></span><span class="updated-label" id="dataUpdated">—</span><button class="primary-button" id="addRecordButton" hidden><span data-icon="plus"></span> Add Record</button></div>
+        </div>
+        <div class="data-toolbar">
+          <div class="search-box"><span data-icon="search"></span><input id="dataSearch" placeholder="Search records in this sheet…" autocomplete="off" aria-label="Search records"><button type="button" class="search-clear" id="dataSearchClear" aria-label="Clear search" title="Clear search" hidden><span data-icon="x"></span></button></div>
+          <div class="sort-chip" id="dataSortChip"></div>
+          <span class="toolbar-spacer"></span>
+          <span class="record-count" id="dataRecordCount">—</span>
+        </div>
+        <section class="panel"><div class="table-scroll data-table-scroll" id="dataTableScroll"><table id="sourceTable"><thead id="sourceTableHead"></thead><tbody id="sourceTableBody"><tr><td class="empty-cell">Select a data source.</td></tr></tbody></table></div></section>
+        <div class="data-pagination">
+          <span id="dataPageInfo">—</span>
+          <div class="pager-right"><div class="page-size"><span>Rows per page</span><select id="dataPageSize" aria-label="Rows per page"><option value="25">25</option><option value="50">50</option><option value="100">100</option><option value="200">200</option></select></div><div class="pager" id="dataPager"></div></div>
+        </div>
         <div class="warning-box" id="dataError" hidden></div>
+      </section>
+      <section class="page" id="page-hiring">
+        <div class="page-heading"><div><h1>Hiring Pipeline</h1><p>Track ongoing hiring requests from personnel request through completion and hiring.</p></div></div>
+        <section class="panel"><div class="empty-state">Hiring Pipeline is planned for the next development phase. Its workflow stages will be defined together before implementation.</div></section>
+      </section>
+      <section class="page" id="page-organization">
+        <div class="page-heading"><div><span class="group-chip">Master Data</span><h1>Organization</h1><p>Manage organization references used across EMP modules.</p></div><button class="primary-button" id="addOrgButton"><span data-icon="plus"></span> Add Item</button></div>
+        <div class="org-tabs" id="orgTabs"><button class="org-tab active" data-category="Department">Department <i></i></button><button class="org-tab" data-category="Business Unit">Business Unit <i></i></button><button class="org-tab" data-category="Position">Position <i></i></button></div>
+        <section class="panel"><div class="panel-heading"><div><h2 id="orgCategoryTitle">Departments</h2><p>Active reference values available to relevant forms.</p></div><span class="count-pill neutral" id="orgCount">0 items</span></div><div class="table-scroll"><table><thead id="orgHead"><tr><th><button type="button" class="th-sort" data-key="name">Name<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="status">Status<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="updatedAt">Last Updated<span class="sort-ico"></span></button></th><th class="col-actions" aria-label="Actions"></th></tr></thead><tbody id="orgRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
+        <div class="info-note"><span data-icon="info"></span><div><strong>Centralized reference data</strong><p>Changes here will be available as options in matching fields. Existing records will not be automatically renamed.</p></div></div>
       </section>
       <section class="page" id="page-users">
         <div class="page-heading"><div><h1>User Management</h1><p>Manage accounts allowed to access EMP.</p></div><button class="primary-button" id="addUserButton"><span data-icon="plus"></span> Add User</button></div>
         <div class="user-summary"><div class="summary-tile"><span>Total Users</span><b id="usersTotal">—</b></div><div class="summary-tile"><span>Active</span><b id="usersActive">—</b></div><div class="summary-tile"><span>Admins</span><b id="usersAdmins">—</b></div></div>
-        <section class="panel"><div class="panel-heading users-heading"><div><h2>Workspace Users</h2><p>Accounts and access permissions.</p></div><div class="search-box"><span data-icon="search"></span><input id="userSearch" placeholder="Search username or name…"></div></div><div class="table-scroll"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last updated</th><th></th></tr></thead><tbody id="userRows"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
+        <section class="panel"><div class="panel-heading users-heading"><div><h2>Workspace Users</h2><p>Accounts and access permissions.</p></div><div class="search-box"><span data-icon="search"></span><input id="userSearch" placeholder="Search username or name…" autocomplete="off" aria-label="Search users"></div></div><div class="table-scroll"><table><thead id="userHead"><tr><th><button type="button" class="th-sort" data-key="fullName">User<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="role">Role<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="status">Status<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="updatedAt">Last updated<span class="sort-ico"></span></button></th><th class="col-actions" aria-label="Actions"></th></tr></thead><tbody id="userRows"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
         <div class="info-note"><span data-icon="info"></span><div><strong>Admin-first release</strong><p>Only active Admin accounts can access this first release. Additional roles can be enabled in a later phase.</p></div></div>
       </section>
     </main>
   </div>
 
-  <div class="modal-backdrop" id="recordModal" hidden><div class="modal record-modal"><div class="modal-header"><div><div class="eyebrow">SPREADSHEET RECORD</div><h2 id="recordModalTitle">Add Record</h2></div><button class="close-button" id="closeRecordModal" aria-label="Close"><span data-icon="x"></span></button></div><form id="recordForm"><div id="recordFields" class="record-fields"></div><div class="modal-note" id="recordModalNote">Fields follow the Google Sheets validation rules for this tab.</div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelRecordModal">Cancel</button><button class="primary-button" id="saveRecordButton">Save Record</button></div><div id="recordFormError" class="form-error" hidden></div></form></div></div>
-  <div class="modal-backdrop" id="userModal" hidden><div class="modal"><div class="modal-header"><div><div class="eyebrow">WORKSPACE ACCESS</div><h2 id="modalTitle">Add User</h2></div><button class="close-button" id="closeModal" aria-label="Close"><span data-icon="x"></span></button></div><form id="userForm"><label>Username<input id="userUsername" required minlength="3" maxlength="40" autocomplete="off"></label><label>Full Name<input id="userFullName" required maxlength="100"></label><label id="passwordLabel">Password<input id="userPassword" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters"></label><div class="form-row"><label>Role<select id="userRole"><option value="Admin">Admin</option></select></label><label>Status<select id="userStatus"><option>Active</option><option>Inactive</option></select></label></div><div class="modal-note">Passwords are hashed on the server. Leave password blank when editing to keep the current password.</div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelModal">Cancel</button><button class="primary-button" id="saveUserButton">Save User</button></div><div id="formError" class="form-error" hidden></div></form></div></div>
-  <div class="toast" id="toast"></div>
+  <div class="modal-backdrop" id="orgModal" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="orgModalTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" data-icon="building-2"></span><div><h2 id="orgModalTitle">Add Organization Item</h2><p>Reference value used in matching form fields.</p></div></div><button type="button" class="close-button" id="closeOrgModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <form id="orgForm" novalidate>
+      <div class="modal-body"><div class="field-grid single">
+        <div class="field"><span class="field-label">Category</span><select id="orgCategory"><option>Department</option><option>Business Unit</option><option>Position</option></select></div>
+        <div class="field"><label class="field-label" for="orgName">Name <em>*</em></label><input id="orgName" required maxlength="120" placeholder="Enter name" autocomplete="off"></div>
+      </div></div>
+      <div id="orgFormError" class="form-error" hidden></div>
+      <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelOrgModal">Cancel</button><button class="primary-button" id="saveOrgButton">Save Item</button></div></div>
+    </form>
+  </div></div>
+
+  <div class="modal-backdrop" id="recordModal" hidden><div class="modal record-modal" role="dialog" aria-modal="true" aria-labelledby="recordModalTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" data-icon="file-spreadsheet"></span><div><h2 id="recordModalTitle">Add Record</h2><p id="recordModalSub"></p></div></div><button type="button" class="close-button" id="closeRecordModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <form id="recordForm" novalidate>
+      <div class="modal-body"><div class="modal-note" id="recordModalNote" hidden></div><div id="recordFields" class="field-grid"></div></div>
+      <div id="recordFormError" class="form-error" hidden></div>
+      <div class="modal-footer"><span class="modal-hint" id="recordModalHint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelRecordModal">Cancel</button><button class="primary-button" id="saveRecordButton">Save Record</button></div></div>
+    </form>
+  </div></div>
+
+  <div class="modal-backdrop" id="userModal" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" data-icon="users"></span><div><h2 id="modalTitle">Add User</h2><p>Account allowed to sign in to EMP.</p></div></div><button type="button" class="close-button" id="closeModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <form id="userForm" novalidate>
+      <div class="modal-body"><div class="field-grid">
+        <div class="field"><label class="field-label" for="userUsername">Username <em>*</em></label><input id="userUsername" required minlength="3" maxlength="40" autocomplete="off" placeholder="e.g. first.last"></div>
+        <div class="field"><label class="field-label" for="userFullName">Full name <em>*</em></label><input id="userFullName" required maxlength="100" autocomplete="off" placeholder="Enter full name"></div>
+        <div class="field field-full" id="passwordLabel"><label class="field-label" for="userPassword">Password <em id="passwordRequired">*</em></label><input id="userPassword" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters"><small class="field-help" id="passwordHelp">Stored as a hash on the server.</small></div>
+        <div class="field"><span class="field-label">Role</span><select id="userRole"><option value="Admin">Admin</option></select></div>
+        <div class="field"><span class="field-label">Status</span><select id="userStatus"><option>Active</option><option>Inactive</option></select></div>
+      </div></div>
+      <div id="formError" class="form-error" hidden></div>
+      <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelModal">Cancel</button><button class="primary-button" id="saveUserButton">Save User</button></div></div>
+    </form>
+  </div></div>
+
+  <div class="modal-backdrop" id="confirmModal" hidden><div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+    <div class="confirm-body"><span class="confirm-icon" id="confirmIcon"></span><div><h2 id="confirmTitle">Are you sure?</h2><p id="confirmMessage"></p></div></div>
+    <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="confirmCancel">Cancel</button><button type="button" class="primary-button" id="confirmOk">Confirm</button></div></div>
+  </div></div>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
   <script src="/app.js" defer></script>
 </body>
 </html>
