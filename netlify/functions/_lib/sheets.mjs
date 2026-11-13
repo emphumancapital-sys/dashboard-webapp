@@ -74,32 +74,11 @@ export async function listActivity(days=10){
     .sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp));
 }
 export async function readTab(title){
-  if (!title || typeof title !== "string") throw new Error("Sheet name is empty or invalid.");
-  const s = await api();
-  const escapedTitle = title.replace(/'/g, "''");
-  let response;
-  try {
-    response = await s.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
-      range: `'${escapedTitle}'!A:ZZ`,
-      valueRenderOption: "UNFORMATTED_VALUE",
-      dateTimeRenderOption: "SERIAL_NUMBER"
-    });
-  } catch (error) {
-    const status = error?.code || error?.response?.status;
-    if (status === 400 || status === 404) {
-      throw new Error(`Tab "${title}" tidak ditemukan atau nama tab tidak cocok.`);
-    }
-    if (status === 403) {
-      throw new Error(`Akses ditolak untuk tab "${title}". Pastikan service account memiliki akses Viewer ke spreadsheet.`);
-    }
-    throw new Error(`Google Sheets API gagal membaca tab "${title}": ${error.message || "unknown error"}`);
-  }
-  const values = response.data.values || [];
-  if (!values.length) return { headers: [], rows: [] };
-  const headers = (values[0] || []).map(value => String(value ?? "").trim());
-  const rows = values.slice(1).filter(row => row.some(value => value !== "" && value !== null && value !== undefined));
-  return { headers, rows };
+  const s=await api();
+  const r=await s.spreadsheets.values.get({spreadsheetId:SHEET_ID,range:`'${title.replace(/'/g,"''")}'!A:ZZ`,valueRenderOption:"UNFORMATTED_VALUE"});
+  const values=r.data.values||[];
+  if(!values.length)return {headers:[],rows:[]};
+  return {headers:values[0].map(x=>String(x||"").trim()),rows:values.slice(1).filter(row=>row.some(x=>x!==""&&x!==null))};
 }
 export async function appendUser(values){
   const s=await api();
@@ -108,4 +87,40 @@ export async function appendUser(values){
 export async function updateUser(rowNumber,values){
   const s=await api();
   await s.spreadsheets.values.update({spreadsheetId:SHEET_ID,range:`'${SYSTEM_USERS}'!A${rowNumber}:G${rowNumber}`,valueInputOption:"RAW",requestBody:{values:[values]}});
+}
+
+
+// Read-only access to any tab, including approved external spreadsheets.
+export async function readTabFromSpreadsheet(spreadsheetId, title, headerRow = 1, dataStartRow = headerRow + 1, page = 1, pageSize = 50, search = "") {
+  if (!spreadsheetId || !title) throw new Error("Spreadsheet ID and tab name are required.");
+  const s = await api();
+  const escapedTitle = String(title).replace(/'/g, "''");
+  let response;
+  try {
+    response = await s.spreadsheets.values.get({
+      spreadsheetId,
+      range: `'${escapedTitle}'!A${headerRow}:ZZ`,
+      valueRenderOption: "UNFORMATTED_VALUE",
+      dateTimeRenderOption: "SERIAL_NUMBER"
+    });
+  } catch (error) {
+    const status = error?.code || error?.response?.status;
+    if (status === 403) throw new Error(`Access denied to spreadsheet/tab "${title}". Share the spreadsheet with the service account as Viewer.`);
+    if (status === 400 || status === 404) throw new Error(`Spreadsheet or tab "${title}" was not found, or its name is incorrect.`);
+    throw new Error(`Google Sheets API error for "${title}": ${error.message || "unknown error"}`);
+  }
+  const values = response.data.values || [];
+  if (!values.length) return { headers: [], rows: [], total: 0, page, pageSize, totalPages: 0, headerRow, dataStartRow };
+  const headers = (values[0] || []).map(value => String(value ?? "").trim());
+  const width = headers.length;
+  let rows = values.slice(Math.max(0, dataStartRow - headerRow)).map(row => Array.from({length: width}, (_, i) => row[i] ?? ""))
+    .filter(row => row.some(value => value !== "" && value !== null && value !== undefined));
+  const q = String(search || "").trim().toLocaleLowerCase();
+  if (q) rows = rows.filter(row => row.some(value => String(value ?? "").toLocaleLowerCase().includes(q)));
+  const total = rows.length;
+  const safePageSize = Math.min(200, Math.max(10, Number(pageSize) || 50));
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+  const safePage = Math.min(totalPages, Math.max(1, Number(page) || 1));
+  const start = (safePage - 1) * safePageSize;
+  return { headers, rows: rows.slice(start, start + safePageSize), total, page: safePage, pageSize: safePageSize, totalPages, headerRow, dataStartRow };
 }

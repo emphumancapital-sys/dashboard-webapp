@@ -46,6 +46,9 @@
       <div class="brand"><span class="brand-mark">e</span><div><b>emp<span>.</span></b><small>Human Capital Services</small></div></div>
       <div class="nav-caption">WORKSPACE</div>
       <button class="nav-item active" data-page="overview"><span class="nav-icon">▦</span>Overview</button>
+      <div class="nav-caption">RECRUITMENT & STAFFING</div>
+      <div id="dataNav"></div>
+      <div class="nav-caption">SYSTEM MANAGEMENT</div>
       <button class="nav-item" data-page="users"><span class="nav-icon">♙</span>User Management</button>
       <div class="sidebar-bottom">
         <div class="connection"><span class="status-dot"></span>Google Sheets connected</div>
@@ -69,6 +72,15 @@
           <section class="panel" id="historyPanel"><div class="panel-heading"><div><h2>Activity History</h2><p>Audit trail from the last 10 days</p></div><span class="count-pill neutral">10 DAYS</span></div><div id="historyList" class="activity-list"><div class="empty-state">No history recorded.</div></div></section>
         </div>
         <div class="warning-box" id="warningBox" hidden></div>
+      </section>
+
+      <section class="page" id="page-data">
+        <div class="page-heading"><div><div class="eyebrow" id="dataGroup">DATA SOURCE</div><h1 id="dataTitle">Data</h1><p id="dataSubtitle">Read-only view of the connected Google Sheets source.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Read-only source</span><span id="dataUpdated">—</span></div></div>
+        <div class="data-toolbar"><div class="search-box">⌕ <input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="secondary-button" id="dataRefresh">↻ Refresh data</button></div></div>
+        <div class="data-source-meta" id="dataSourceMeta"></div>
+        <section class="panel"><div class="table-scroll data-table-scroll"><table id="sourceTable"><thead id="sourceTableHead"></thead><tbody id="sourceTableBody"><tr><td class="empty-cell">Select a data source.</td></tr></tbody></table></div></section>
+        <div class="data-pagination"><span id="dataPageInfo">—</span><div><button class="secondary-button" id="dataPrev">Previous</button><button class="secondary-button" id="dataNext">Next</button></div></div>
+        <div class="warning-box" id="dataError" hidden></div>
       </section>
       <section class="page" id="page-users">
         <div class="page-heading"><div><div class="eyebrow">ACCESS & PERMISSIONS</div><h1>User Management</h1><p>Manage accounts allowed to access EMP.</p></div><button class="primary-button" id="addUserButton">＋ Add User</button></div>

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { user: null, users: [], editing: null };
+const state = { user: null, users: [], editing: null, sources: [], activeSource: null, dataPage: 1, dataPageSize: 50, dataTotalPages: 1, searchTimer: null };
 
 document.addEventListener("DOMContentLoaded", async () => {
   $("todayLabel").textContent = new Intl.DateTimeFormat("en-US",{weekday:"short",month:"short",day:"numeric"}).format(new Date());
@@ -25,6 +25,10 @@ function bindEvents(){
   $("userForm").addEventListener("submit",saveUser);
   $("userSearch").addEventListener("input",renderUsers);
   $("viewHistory").addEventListener("click",()=>$("historyPanel").scrollIntoView({behavior:"smooth",block:"center"}));
+  $("dataSearch").addEventListener("input",()=>{clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{state.dataPage=1;loadSourceData();},350);});
+  $("dataRefresh").addEventListener("click",()=>loadSourceData());
+  $("dataPrev").addEventListener("click",()=>{if(state.dataPage>1){state.dataPage--;loadSourceData();}});
+  $("dataNext").addEventListener("click",()=>{if(state.dataPage<state.dataTotalPages){state.dataPage++;loadSourceData();}});
 }
 async function api(url,options={}){
   const res=await fetch(url,{...options,credentials:"same-origin",headers:{"Content-Type":"application/json",...(options.headers||{})}});
@@ -46,14 +50,19 @@ function enterApp(user){
   state.user=user;$("loginView").hidden=true;$("appView").hidden=false;
   const name=user.fullName||user.username;$("profileName").textContent=name;$("profileRole").textContent=user.role||"Admin";$("profileInitial").textContent=initial(name);$("topInitial").textContent=initial(name);
   loadDashboard();
+  loadSources();
 }
-function navigate(page){
+function navigate(page, sourceId=null){
   document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.page===page));
   document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
-  $("page-"+page).classList.add("active");$("breadcrumbCurrent").textContent=page==="users"?"User Management":"Overview";$("sidebar").classList.remove("open");
+  $("page-"+page).classList.add("active");
+  if(page==="users")$("breadcrumbCurrent").textContent="User Management";
+  else if(page==="data"){const src=state.sources.find(x=>x.id===sourceId)||state.activeSource;state.activeSource=src||state.activeSource;$("breadcrumbCurrent").textContent=src?.label||"Data";if(src){state.dataPage=1;$("dataSearch").value="";loadSourceData();}}
+  else $("breadcrumbCurrent").textContent="Overview";
+  $("sidebar").classList.remove("open");
   if(page==="users")loadUsers();
 }
-function refreshCurrent(){if($("page-users").classList.contains("active"))loadUsers();else loadDashboard();}
+function refreshCurrent(){if($("page-users").classList.contains("active"))loadUsers();else if($("page-data").classList.contains("active"))loadSourceData();else loadDashboard();}
 async function loadDashboard(){
   $("refreshButton").disabled=true;
   try{const data=await api("/.netlify/functions/dashboard");renderDashboard(data);}
@@ -66,12 +75,37 @@ function renderDashboard(d){
   $("contractRows").innerHTML=d.contractAlerts?.length?d.contractAlerts.map(r=>`<tr><td><div class="employee-cell"><b>${esc(r.employee)}</b><small>${esc(r.employeeId)} · ${esc(r.position)}</small></div></td><td>${esc(r.businessUnit)}</td><td>${esc(r.endDate)}</td><td><span class="days-chip ${r.daysRemaining<=30?"critical":r.daysRemaining>60?"safe":""}">${r.daysRemaining===0?"Today":"H-"+r.daysRemaining}</span></td></tr>`).join(""):`<tr><td colspan="4" class="empty-cell">No contract expiration within 90 days.</td></tr>`;
   $("rfpRows").innerHTML=d.rfpAlerts?.length?d.rfpAlerts.slice(0,8).map(r=>`<tr><td><div class="employee-cell"><b>${esc(r.position)}</b><small>${esc(r.businessUnit)} · ${esc(r.rfpNumber)}</small></div></td><td>${esc(r.recruitmentType)}</td><td><span class="days-chip ${r.ageDays>=60?"critical":""}">${r.ageDays} days</span></td></tr>`).join(""):`<tr><td colspan="3" class="empty-cell">No qualifying RFP aged 30+ days.</td></tr>`;
   renderActivity(d.latestActivities||[],$("latestActivity"),false);renderActivity(d.activityHistory||[],$("historyList"),true);
-  const warnings=d.warnings||[];const sources=d.sourceStatus||[];const unavailable=sources.filter(x=>!x.available);const sourceSummary=sources.map(x=>`${x.sheet}: ${x.available?`${fmt(x.rows)} rows`:"unavailable"}`).join(" · ");const notices=[...warnings];if(sourceSummary)notices.unshift(`Data sources — ${sourceSummary}`);$("warningBox").hidden=!notices.length;$("warningBox").textContent=notices.join("\n");$("warningBox").classList.toggle("has-error",unavailable.length>0);
+  const warnings=d.warnings||[];$("warningBox").hidden=!warnings.length;$("warningBox").textContent=warnings.length?"Data mapping notice: "+warnings.join(" "):"";
 }
 function renderActivity(rows,target,history){
   if(!rows.length){target.innerHTML=`<div class="empty-state">${history?"No activity in the last 10 days.":"No activity recorded yet."}</div>`;return;}
   target.innerHTML=rows.map(r=>{const date=r.timestamp?new Date(r.timestamp):null;const time=date?date.toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}):"";return `<div class="activity-item">${history?`<span class="activity-time">${esc(time)}</span>`:`<span class="activity-symbol">${iconFor(r.action)}</span>`}<div class="activity-copy"><b>${esc(r.action)} · ${esc(r.module)}</b><small>${esc(r.summary)}${r.actor?" — "+esc(r.actor):""}</small></div>${history?"":`<span class="activity-time">${date?date.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}</span>`}</div>`;}).join("");
 }
+async function loadSources(){
+  const nav=$("dataNav");nav.innerHTML='<div class="nav-loading">Loading sources…</div>';
+  try{const result=await api("/.netlify/functions/data?action=sources");state.sources=result.sources||[];
+    nav.innerHTML=state.sources.map(source=>`<button class="nav-item data-nav-item" data-source="${escAttr(source.id)}"><span class="nav-icon">${source.available?"▤":"⚠"}</span>${esc(source.label)}${source.available?"":" <small>!</small>"}</button>`).join("");
+    nav.querySelectorAll("[data-source]").forEach(button=>button.addEventListener("click",()=>navigate("data",button.dataset.source)));
+    const connected=result.summary?.connected||0,total=result.summary?.total||state.sources.length;
+    const indicator=document.querySelector(".connection");if(indicator)indicator.innerHTML=`<span class="status-dot"></span>${connected}/${total} data sources connected`;
+    const failed=state.sources.filter(x=>!x.available);if(failed.length)toast(`${failed.length} data source(s) could not be read. Check source status.`);
+  }catch(error){nav.innerHTML=`<div class="empty-state">${esc(error.message)}</div>`;toast(error.message);}
+}
+async function loadSourceData(){
+  const source=state.activeSource;if(!source)return;
+  $("dataTitle").textContent=source.label;$("dataGroup").textContent=source.group;$("dataSubtitle").textContent=`Read-only data from Google Sheets tab: ${source.tab}`;
+  $("sourceTableHead").innerHTML="";$("sourceTableBody").innerHTML='<tr><td class="empty-cell">Loading source data…</td></tr>';$("dataError").hidden=true;$("dataRefresh").disabled=true;
+  try{const q=new URLSearchParams({source:source.id,page:String(state.dataPage),pageSize:String(state.dataPageSize),search:$("dataSearch").value||""});const data=await api(`/.netlify/functions/data?${q}`);
+    state.dataTotalPages=data.totalPages||1;state.dataPage=data.page||1;
+    $("sourceTableHead").innerHTML=`<tr>${data.headers.map(h=>`<th>${esc(h||"(blank header)")}</th>`).join("")}</tr>`;
+    $("sourceTableBody").innerHTML=data.rows.length?data.rows.map(row=>`<tr>${row.map(value=>`<td>${esc(formatCell(value))}</td>`).join("")}</tr>`).join(""):`<tr><td class="empty-cell" colspan="${Math.max(data.headers.length,1)}">No records found in this source.</td></tr>`;
+    $("dataRecordCount").textContent=`${Number(data.total||0).toLocaleString()} records`;$("dataPageInfo").textContent=`Page ${state.dataPage} of ${state.dataTotalPages}`;$("dataPrev").disabled=state.dataPage<=1;$("dataNext").disabled=state.dataPage>=state.dataTotalPages;
+    $("dataUpdated").textContent="Read "+new Date(data.checkedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+    $("dataSourceMeta").innerHTML=`<span class="source-meta-chip"><strong>Source tab:</strong> ${esc(data.source.tab)}</span><span class="source-meta-chip"><strong>Header row:</strong> ${data.headerRow}</span><span class="source-meta-chip"><strong>Data starts:</strong> row ${data.dataStartRow}</span><span class="source-meta-chip"><strong>Columns:</strong> ${data.headers.filter(Boolean).length}</span><span class="source-meta-chip"><strong>Access:</strong> Read only</span>`;
+  }catch(error){$("sourceTableBody").innerHTML=`<tr><td class="empty-cell">Could not load source data.</td></tr>`;$("dataError").hidden=false;$("dataError").textContent=error.message;$("dataRecordCount").textContent="—";$("dataPageInfo").textContent="—";$("dataSourceMeta").innerHTML=`<span class="source-meta-chip"><strong>Source tab:</strong> ${esc(source.tab)}</span>`;}
+  finally{$("dataRefresh").disabled=false;}
+}
+function formatCell(value){if(value===null||value===undefined)return "";if(typeof value==="number"&&value>20000&&value<80000){const date=new Date(Date.UTC(1899,11,30)+value*86400000);if(!Number.isNaN(date.getTime()))return date.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}return String(value);}
 async function loadUsers(){
   $("userRows").innerHTML='<tr><td colspan="5" class="empty-cell">Loading users…</td></tr>';
   try{const d=await api("/.netlify/functions/users");state.users=d.users||[];renderUsers();}catch(e){toast(e.message);}
