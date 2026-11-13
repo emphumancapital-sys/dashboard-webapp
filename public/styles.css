@@ -312,13 +312,19 @@ tbody tr:hover .row-action{color:var(--ink-2)}.row-action:hover,tbody tr:hover .
 .info-grid dd.is-multiline{white-space:pre-line;font-weight:400;font-size:12.5px;line-height:1.55}.unsent-row small.is-retry{color:var(--amber)}
 
 /* Overview: contract reminders + joining soon */
-#historyPanel{grid-column:1/-1}.count-pill.red{background:var(--red-bg);color:var(--red)}.count-pill.neutral,.days-chip.neutral{background:var(--hover);color:var(--muted)}
+.round-tag{flex:none;width:34px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--blue-bg);color:var(--blue);font-size:11px;font-weight:700}.round-tag.second{background:var(--violet-bg);color:var(--violet)}.activity-list .empty-block{padding:34px 12px}.count-pill.red{background:var(--red-bg);color:var(--red)}.count-pill.neutral,.days-chip.neutral{background:var(--hover);color:var(--muted)}
 tr.is-muted td{color:var(--faint)}tr.is-muted .employee-cell b{color:var(--muted);font-weight:500}tr.is-muted:hover td{color:var(--ink-2)}tr.is-pending{opacity:.55;pointer-events:none}
 .done-chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:99px;background:var(--brand-soft);color:var(--brand-ink);font-size:11.5px;font-weight:600;white-space:nowrap}.done-chip svg{width:12px;height:12px}
 #contractRows .row-actions{align-items:center;gap:4px}#contractRows td.col-actions{text-align:right;white-space:nowrap}th.col-actions{text-align:right}
 .dashboard-grid .reminder-scroll{max-height:300px}.end-cell{display:flex;flex-direction:column;align-items:flex-start;gap:3px}.end-cell small{color:var(--muted);font-size:11.5px}
 #contractRows td.col-actions,.reminder-scroll th.col-actions{position:sticky;right:0;width:1%;padding-left:8px}#contractRows td.col-actions{background:linear-gradient(var(--rowbg),var(--rowbg)),var(--solid)}.reminder-scroll th.col-actions{z-index:3}
-@media(max-width:720px){.reminder-scroll th:nth-child(2),#contractRows td:nth-child(2),#contractRows .k-next span{display:none}#contractRows .k-next{padding:0 8px}}
+@media(max-width:720px){.reminder-scroll th:nth-child(2),#contractRows td:nth-child(2){display:none}}
+.collapsible{align-self:start}.collapsible>.panel-heading{cursor:pointer;user-select:none}.collapsible.is-collapsed>.panel-heading{margin-bottom:0}.collapsible.is-collapsed>.collapse-body{display:none}.collapse-body{animation:fade .2s ease}
+.panel-toggle{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:0;border:0;border-radius:7px;background:none;color:var(--muted)}.panel-heading:hover .panel-toggle{background:var(--hover);color:var(--ink)}.panel-toggle svg{width:15px;height:15px;transition:transform .22s var(--ease)}.collapsible.is-collapsed .panel-toggle svg{transform:rotate(-90deg)}
+.tooltip{position:fixed;z-index:90;max-width:240px;padding:5px 9px;border-radius:7px;background:var(--ink);color:var(--bg);font-size:11.5px;font-weight:500;line-height:1.35;white-space:nowrap;pointer-events:none;opacity:0;transform:translateY(2px);transition:opacity .12s,transform .12s;box-shadow:0 6px 16px -6px rgba(0,0,0,.4)}.tooltip.show{opacity:1;transform:none}
+#contractRows .row-action.good,#contractRows tr:hover .row-action.good{color:var(--brand-ink)}
+.contract-summary{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--th)}.contract-summary small{display:block;color:var(--muted);font-size:11.5px}.contract-summary b{font-size:15px;font-weight:650;letter-spacing:-.01em}.summary-spacer{flex:1}
+.modal-actions .primary-button svg{width:14px;height:14px}
 .joiner-when{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none}.joiner-when small{color:var(--faint);font-size:11px}
 
 /* ---------- Responsive ---------- */

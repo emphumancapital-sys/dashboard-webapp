@@ -11,7 +11,7 @@ const state = {
 const PAGE_SIZES = [25, 50, 100, 200];
 
 document.addEventListener("DOMContentLoaded", async () => {
-  renderStaticIcons(); initTheme(); initSidebar();
+  renderStaticIcons(); initTheme(); initSidebar(); initCollapsibles(); initTooltips();
   try { const saved = Number(localStorage.getItem("emp-page-size")); if (PAGE_SIZES.includes(saved)) state.dataPageSize = saved; } catch {}
   $("dataPageSize").value = String(state.dataPageSize);
   ["orgCategory", "userRole", "userStatus", "dataPageSize", "pipeBU"].forEach(id => enhanceSelect($(id), id === "dataPageSize" ? { compact: true } : {}));
@@ -40,7 +40,7 @@ function bindEvents() {
     const dateClear = e.target.closest(".date-clear"); if (dateClear) { setDateField(dateClear.closest(".date-field"), ""); dateClear.closest(".date-field").querySelector(".date-trigger").focus(); return; }
     const fieldLabel = e.target.closest("span.field-label"); if (fieldLabel) { fieldLabel.parentElement.querySelector(".select-trigger,.date-trigger")?.focus(); return; }
     const tr = e.target.closest("tbody tr");
-    if (!tr || e.target.closest("button,a") || tr.querySelector(".empty-cell,.skeleton") || tr.hasAttribute("data-pipe-row")) return;
+    if (!tr || e.target.closest("button,a") || tr.querySelector(".empty-cell,.skeleton") || tr.hasAttribute("data-pipe-row") || tr.hasAttribute("data-contract")) return;
     tr.parentElement.querySelectorAll("tr.selected").forEach(x => x !== tr && x.classList.remove("selected"));
     tr.classList.toggle("selected");
   });
@@ -54,6 +54,9 @@ function bindEvents() {
   bindModal("pipeModal", closePipeDetail, ["closePipeModal", "cancelPipeModal"]);
   bindModal("moveModal", closeMoveDialog, ["closeMoveModal", "cancelMoveModal"]);
   bindModal("outcomeModal", closeOutcomeDialog, ["closeOutcomeModal", "cancelOutcomeModal"]);
+  bindModal("contractModal", closeContractDetail, ["closeContractModal", "cancelContractModal"]);
+  $("contractSent").addEventListener("click", () => setContractStatus(state.contractRow, "sent", true));
+  $("contractResign").addEventListener("click", () => setContractStatus(state.contractRow, "resign", true));
   bindModal("confirmModal", () => settleConfirm(false), ["confirmCancel"]);
   bindPipeline();
   $("confirmOk").addEventListener("click", () => settleConfirm(true));
@@ -64,7 +67,6 @@ function bindEvents() {
   $("orgTabs").addEventListener("click", e => { const b = e.target.closest("[data-category]"); if (!b) return; state.organizationCategory = b.dataset.category; renderOrganization(); });
   $("userForm").addEventListener("submit", saveUser);
   $("userSearch").addEventListener("input", renderUsers);
-  $("viewHistory").addEventListener("click", () => $("historyPanel").scrollIntoView({ behavior: "smooth", block: "center" }));
   bindLocalSort("orgHead", "org", renderOrganization);
   bindLocalSort("userHead", "users", renderUsers);
   $("orgRows").addEventListener("click", e => {
@@ -191,7 +193,7 @@ function renderDashboard(d) {
   $("yearCaption").textContent = `${fmt(exits.resignation)} resignation · ${fmt(exits.termination)} termination · ${fmt(exits.retirement)} retirement`;
   $("rfpCount").textContent = (d.rfpAlerts || []).length + " recent records";
   $("lastUpdated").textContent = "Updated " + new Date(d.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  state.dashboard = d; renderContracts(); renderJoiners(d);
+  state.dashboard = d; renderContracts(); renderInterviews(d); renderJoiners(d);
   $("rfpRows").innerHTML = d.rfpAlerts?.length ? d.rfpAlerts.map(r => `<tr><td><div class="employee-cell"><b>${esc(r.position)}</b><small>${esc(r.rfpCode)}</small></div></td><td>${esc(r.businessUnit)}</td><td>${esc(r.contract)}</td><td>${esc(r.process)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No RFP records received in ${d.currentYear}.</td></tr>`;
   $("rfpYearCaption").textContent = String(d.currentYear || "");
   renderActivity(d.latestActivities || [], $("latestActivity"), false); renderActivity(d.activityHistory || [], $("historyList"), true);
@@ -201,41 +203,65 @@ function renderDashboard(d) {
 /* Contract reminders: rows that still need action first, rows already sent to C&B kept as muted information. */
 function renderContracts() {
   const d = state.dashboard || {}, rows = d.contractAlerts || [], need = rows.filter(r => !r.done), done = rows.length - need.length, overdue = need.filter(r => r.state === "overdue").length;
-  $("contractCount").className = "count-pill " + (overdue ? "red" : need.length ? "amber" : "neutral");
-  $("contractCount").textContent = rows.length ? `${need.length} need action${done ? ` · ${done} done` : ""}` : "None";
-  $("contractFoot").textContent = overdue ? `${overdue} overdue · next 90 days` : "Next 90 days";
-  const remaining = r => r.daysRemaining < 0 ? `${-r.daysRemaining} day${r.daysRemaining === -1 ? "" : "s"} overdue` : r.daysRemaining === 0 ? "Today" : `In ${r.daysRemaining} day${r.daysRemaining === 1 ? "" : "s"}`;
-  $("contractRows").innerHTML = rows.length ? rows.map(r => `<tr class="${r.done ? "is-muted" : ""}${r.pending ? " is-pending" : ""}" data-contract="${r.rowNumber}">
+  $("contractCount").className = "count-pill " + (overdue ? "red" : need.length ? "amber" : "neutral"); $("contractCount").hidden = !rows.length;
+  $("contractCount").textContent = `${overdue ? `${overdue} overdue · ` : ""}${need.length} need action${done ? ` · ${done} done` : ""}`;
+  const remaining = contractRemaining;
+  $("contractRows").innerHTML = rows.length ? rows.map(r => `<tr class="is-clickable${r.done ? " is-muted" : ""}${r.pending ? " is-pending" : ""}" data-contract="${r.rowNumber}">
     <td><div class="employee-cell"><b>${esc(r.employee)}</b><small>${esc(r.employeeId)} · ${esc(r.position)}</small></div></td><td>${esc(r.businessUnit)}</td>
     <td><div class="end-cell"><span class="days-chip ${r.done ? "neutral" : r.daysRemaining <= 30 ? "critical" : r.daysRemaining > 60 ? "safe" : ""}">${esc(remaining(r))}</span><small>${esc(r.endDate)}</small></div></td>
-    <td class="col-actions">${r.done ? `<span class="done-chip" title="No action needed. Listed until the contract ends.">${svgIcon("check", 12)}${esc(r.status)}</span>` : `<div class="row-actions"><button type="button" class="k-next" data-contract-action="sent" title="Mark as sent to C&amp;B">${svgIcon("send", 12)}<span>Sent to C&amp;B</span></button><button type="button" class="row-action" data-contract-menu title="Other status" aria-label="Other status for ${escAttr(r.employee)}" aria-haspopup="menu">${svgIcon("more", 15)}</button></div>`}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No contract end dates within the next 90 days.</td></tr>`;
+    <td class="col-actions">${r.done ? `<span class="done-chip">${svgIcon("check", 12)}${esc(r.status)}</span>` : `<div class="row-actions"><button type="button" class="row-action good" data-contract-action="sent" data-tip="Mark as sent to C&amp;B" aria-label="Mark ${escAttr(r.employee)} as sent to C&amp;B">${svgIcon("check-circle", 15)}</button><button type="button" class="row-action" data-contract-menu data-tip="Other status" aria-label="Other status for ${escAttr(r.employee)}" aria-haspopup="menu">${svgIcon("more", 15)}</button></div>`}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">${emptyBlock("calendar-clock", "No contracts ending soon")}</td></tr>`;
 }
 function renderJoiners(d) {
   const rows = d.upcomingJoiners || [];
-  $("joinerCount").textContent = rows.length ? `${rows.length} joining` : "None"; $("joinerCount").className = "count-pill " + (rows.length ? "blue" : "neutral");
-  $("joinerList").innerHTML = rows.length ? rows.map(r => `<div class="activity-item"><span class="avatar">${esc(initial(r.name))}</span><div class="activity-copy"><b>${esc(r.name)}</b><small>${esc([r.position, r.businessUnit, r.contract].filter(x => x && x !== "—").join(" · ") || "—")}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${r.daysUntil === 0 ? "Today" : r.daysUntil === 1 ? "Tomorrow" : `In ${r.daysUntil} days`}</span><small>${esc(r.joinDate)}</small></div></div>`).join("") : `<div class="empty-state">No one is joining in the next ${d.joinWindowDays || 7} days.</div>`;
+  $("joinerCount").textContent = `${rows.length} joining`; $("joinerCount").hidden = !rows.length;
+  $("joinerList").innerHTML = rows.length ? rows.map(r => `<div class="activity-item"><span class="avatar">${esc(initial(r.name))}</span><div class="activity-copy"><b>${esc(r.name)}</b><small>${esc([r.position, r.businessUnit, r.contract].filter(x => x && x !== "—").join(" · ") || "—")}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span><small>${esc(r.joinDate)}</small></div></div>`).join("") : emptyBlock("user-plus", "No one joining soon");
+}
+const soonLabel = days => days === 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days`;
+function renderInterviews(d) {
+  const rows = d.upcomingInterviews || [];
+  $("interviewCount").textContent = `${rows.length} scheduled`; $("interviewCount").hidden = !rows.length;
+  $("interviewList").innerHTML = rows.length ? rows.map(r => `<div class="activity-item"><span class="round-tag ${r.round.startsWith("2") ? "second" : ""}">${r.round.startsWith("2") ? "2nd" : "1st"}</span><div class="activity-copy"><b>${esc(r.candidate || r.position)}</b><small>${esc([r.candidate ? r.position : "", r.businessUnit, r.rfpCode].filter(x => x && x !== "—").join(" · ") || "—")}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span><small>${esc(r.date)}</small></div></div>`).join("") : emptyBlock("calendar", "No interviews scheduled");
 }
 function openContractMenu(button, rowNumber) {
   if (Pop.current?.anchor === button) { Pop.close(); return; }
   const panel = document.createElement("div"); panel.className = "select-pop stage-menu"; panel.setAttribute("role", "menu"); panel.tabIndex = -1;
-  panel.innerHTML = `<div class="pop-title">Set status</div><button type="button" role="menuitem" class="pop-option" data-action="sent"><span>Sent to C&amp;B</span></button><button type="button" role="menuitem" class="pop-option" data-action="resign"><span>Resign</span></button>`;
-  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b) return; Pop.close(); setContractStatus(rowNumber, b.dataset.action); });
+  panel.innerHTML = `<button type="button" role="menuitem" class="pop-option" data-action="detail"><span>View details</span></button><div class="pop-sep"></div><div class="pop-title">Set status</div><button type="button" role="menuitem" class="pop-option" data-action="sent"><span>Sent to C&amp;B</span></button><button type="button" role="menuitem" class="pop-option" data-action="resign"><span>Resign</span></button>`;
+  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b) return; Pop.close(); if (b.dataset.action === "detail") openContractDetail(rowNumber); else setContractStatus(rowNumber, b.dataset.action); });
   Pop.open(button, panel); panel.querySelector(".pop-option").focus({ preventScroll: true });
 }
-async function setContractStatus(rowNumber, action) {
+const contractRemaining = r => r.daysRemaining < 0 ? `${-r.daysRemaining} day${r.daysRemaining === -1 ? "" : "s"} overdue` : r.daysRemaining === 0 ? "Today" : `In ${r.daysRemaining} day${r.daysRemaining === 1 ? "" : "s"}`;
+const KEEP_UPPER = new Set(["RFP", "MCU", "ID", "P.E", "C&B", "L"]);
+const headerLabel = text => String(text).split(/\s+/).map(w => KEEP_UPPER.has(w.toUpperCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+// Full row from Extend 2026, so the contract can be checked before its status is changed.
+function openContractDetail(rowNumber) {
+  const row = (state.dashboard?.contractAlerts || []).find(r => r.rowNumber === rowNumber); if (!row) return;
+  state.contractRow = rowNumber;
+  $("contractModalTitle").textContent = row.employee; $("contractModalSub").textContent = [row.employeeId, row.position, `Row ${row.rowNumber}`].filter(x => x && x !== "—").join(" · ");
+  $("contractSummary").innerHTML = `<div><small>Contract end</small><b>${esc(row.endDate)}</b></div><span class="days-chip ${row.done ? "neutral" : row.daysRemaining <= 30 ? "critical" : row.daysRemaining > 60 ? "safe" : ""}">${esc(contractRemaining(row))}</span><span class="summary-spacer"></span>${row.done ? `<span class="done-chip">${svgIcon("check", 12)}${esc(row.status)}</span>` : `<span class="days-chip neutral">${esc(row.status || "No status yet")}</span>`}`;
+  $("contractInfo").innerHTML = (row.details || []).map(item => `<div><dt>${esc(headerLabel(item.label))}</dt><dd>${/^https?:\/\/\S+$/i.test(item.value) ? `<a class="cell-link" href="${escAttr(item.value)}" target="_blank" rel="noopener noreferrer">${svgIcon("external-link", 12)}<span>Open link</span></a>` : esc(item.value)}</dd></div>`).join("");
+  $("contractError").hidden = true; $("contractSent").hidden = row.done; $("contractResign").hidden = row.done; $("contractSent").innerHTML = svgIcon("check", 14) + "Sent to C&amp;B";
+  openModal("contractModal", row.done ? $("cancelContractModal") : $("contractSent"));
+}
+function closeContractDetail() { closeModal("contractModal"); state.contractRow = null; }
+async function setContractStatus(rowNumber, action, fromDetail = false) {
   const row = (state.dashboard?.contractAlerts || []).find(r => r.rowNumber === rowNumber); if (!row || row.pending) return; const label = action === "resign" ? "Resign" : "Sent to C&B";
-  const ok = await confirmDialog({ title: `Mark ${row.employee} as ${label}?`, message: action === "resign" ? `STATUS in Extend 2026 is set to Resign. The contract stays listed here, without action, until ${row.endDate}.` : `STATUS in Extend 2026 is set to Sent to C&B. Nothing more is needed from you; the contract stays listed here as information until ${row.endDate}.`, confirmLabel: `Mark as ${label}`, icon: action === "resign" ? "log-out" : "send" });
-  if (!ok) return;
+  // From the row icon a confirmation is asked first; in the detail dialog the details themselves are the check.
+  if (!fromDetail) { const ok = await confirmDialog({ title: `Mark ${row.employee} as ${label}?`, message: `Contract ends ${row.endDate}. STATUS in Extend 2026 is set to ${label}.`, confirmLabel: `Mark as ${label}`, icon: action === "resign" ? "log-out" : "check-circle" }); if (!ok) return; }
+  const button = fromDetail ? (action === "resign" ? $("contractResign") : $("contractSent")) : null, buttonHtml = button?.innerHTML;
+  if (button) { $("contractError").hidden = true; button.disabled = true; if (action !== "resign") button.innerHTML = `<i class="spinner"></i>Saving…`; }
   row.pending = true; renderContracts();
   try {
     const result = await api("/.netlify/functions/contracts", { method: "POST", body: JSON.stringify({ rowNumber, employee: row.employee, action }) });
     Object.assign(row, { pending: false, done: true, status: result.value || label, state: action === "resign" ? "closed" : "sent" });
+    const statusDetail = (row.details || []).find(item => item.label.trim().toUpperCase() === "STATUS"); if (statusDetail) statusDetail.value = row.status; else (row.details = row.details || []).push({ label: "STATUS", value: row.status });
     state.dashboard.contractAlerts = state.dashboard.contractAlerts.filter(r => r.daysRemaining >= 0 || !r.done).sort((a, b) => Number(a.done) - Number(b.done) || a.daysRemaining - b.daysRemaining);
+    if (fromDetail) closeContractDetail();
     renderContracts(); toast(`${row.employee} marked as ${result.value || label}.`, "success");
-  } catch (error) { row.pending = false; renderContracts(); toast(error.message, "error", { duration: 8000 }); }
+  } catch (error) { row.pending = false; renderContracts(); if (fromDetail) { $("contractError").textContent = error.message; $("contractError").hidden = false; } else toast(error.message, "error", { duration: 8000 }); }
+  finally { if (button) { button.disabled = false; button.innerHTML = buttonHtml; } }
 }
 function renderActivity(rows, target, history) {
-  if (!rows.length) { target.innerHTML = `<div class="empty-state">${history ? "No activity in the last 10 days." : "No activity recorded yet."}</div>`; return; }
+  if (!rows.length) { target.innerHTML = emptyBlock("activity", history ? "No activity in the last 10 days" : "No activity yet"); return; }
   target.innerHTML = rows.map(r => { const date = r.timestamp ? new Date(r.timestamp) : null; const time = date ? date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""; return `<div class="activity-item">${history ? `<span class="activity-time">${esc(time)}</span>` : `<span class="activity-symbol">${svgIcon(iconFor(r.action), 15)}</span>`}<div class="activity-copy"><b>${esc(r.action)} · ${esc(r.module)}</b><small>${esc(r.summary)}${r.actor ? " — " + esc(r.actor) : ""}</small></div>${history ? "" : `<span class="activity-time">${date ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>`}</div>`; }).join("");
 }
 
@@ -560,7 +586,7 @@ function bindPipeline() {
   $("pipeUnsent").addEventListener("click", () => openUnsentList($("pipeUnsent")));
   $("contractRows").addEventListener("click", e => {
     const tr = e.target.closest("[data-contract]"); if (!tr) return; const rowNumber = Number(tr.dataset.contract), action = e.target.closest("[data-contract-action]"), menu = e.target.closest("[data-contract-menu]");
-    if (action) setContractStatus(rowNumber, action.dataset.contractAction); else if (menu) openContractMenu(menu, rowNumber);
+    if (action) setContractStatus(rowNumber, action.dataset.contractAction); else if (menu) openContractMenu(menu, rowNumber); else openContractDetail(rowNumber);
   });
   bindLocalSort("pipeHead", "pipe", renderPipeline);
   bindLocalSort("pipeFailedHead", "pipeFailed", renderPipeline);
@@ -1073,6 +1099,36 @@ const ICONS = {
 ICONS["refresh-cw"] = ICONS["rotate-cw"];
 function svgIcon(name, size = 18) { const paths = ICONS[name] || ICONS["file-spreadsheet"]; return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`; }
 function renderStaticIcons() { document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = svgIcon(el.dataset.icon, el.classList.contains("metric-icon") ? 17 : 18); }); }
+
+/* ---- collapsible panels (optional sections, closed by default, remembered per browser) ---- */
+function initCollapsibles() {
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem("emp-collapsed") || "{}") || {}; } catch {}
+  const apply = (panel, collapsed) => { panel.classList.toggle("is-collapsed", collapsed); panel.querySelector(".panel-toggle").setAttribute("aria-expanded", String(!collapsed)); };
+  document.querySelectorAll(".collapsible[data-collapse]").forEach(panel => {
+    apply(panel, saved[panel.dataset.collapse] !== false);
+    panel.querySelector(".panel-heading").addEventListener("click", () => { const collapsed = !panel.classList.contains("is-collapsed"); apply(panel, collapsed); saved[panel.dataset.collapse] = collapsed; try { localStorage.setItem("emp-collapsed", JSON.stringify(saved)); } catch {} });
+  });
+}
+/* ---- tooltips for icon-only buttons: [data-tip], plus any row action that still carries a title ---- */
+function initTooltips() {
+  const tip = document.createElement("div"); tip.className = "tooltip"; tip.setAttribute("role", "tooltip"); document.body.appendChild(tip);
+  let timer = null, current = null;
+  const hide = () => { clearTimeout(timer); current = null; tip.classList.remove("show"); };
+  const show = el => {
+    if (el.hasAttribute("title")) { el.dataset.tip = el.getAttribute("title"); el.removeAttribute("title"); }
+    const text = el.dataset.tip; if (!text || current === el) return; hide(); current = el;
+    timer = setTimeout(() => {
+      if (current !== el || !el.isConnected) return; tip.textContent = text; tip.classList.add("show");
+      const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight, above = r.top - h - 8 >= 4;
+      tip.style.left = Math.max(6, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 6)) + "px"; tip.style.top = (above ? r.top - h - 7 : r.bottom + 7) + "px";
+    }, 280);
+  };
+  const target = e => e.target.closest?.("[data-tip],.row-action[title],.row-flag[title]");
+  document.addEventListener("mouseover", e => { const el = target(e); if (el) show(el); else if (current) hide(); });
+  document.addEventListener("focusin", e => { const el = target(e); if (el && el.matches(":focus-visible")) show(el); });
+  ["focusout", "mousedown", "keydown"].forEach(type => document.addEventListener(type, hide, true));
+  document.addEventListener("scroll", hide, true); window.addEventListener("blur", hide);
+}
 
 /* ---- theme, sidebar, motion helpers ---- */
 function applyTheme(t, save) { document.documentElement.dataset.theme = t; if (save) { try { localStorage.setItem("emp-theme", t); } catch {} } document.querySelectorAll(".theme-toggle").forEach(b => b.setAttribute("aria-checked", String(t === "dark"))); document.querySelector('meta[name="theme-color"]')?.setAttribute("content", t === "dark" ? "#0b110e" : "#f3f6f4"); }

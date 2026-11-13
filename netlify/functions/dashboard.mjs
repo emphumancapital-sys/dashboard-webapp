@@ -31,7 +31,7 @@ function parseDate(value){
   const parsed=new Date(text);return Number.isNaN(parsed.getTime())?null:parsed;
 }
 function dateLabel(date){return date.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}
-const CONTRACT_WINDOW_DAYS=90, CONTRACT_OVERDUE_DAYS=30, JOIN_WINDOW_DAYS=7;
+const CONTRACT_WINDOW_DAYS=90, CONTRACT_OVERDUE_DAYS=30, JOIN_WINDOW_DAYS=7, INTERVIEW_WINDOW_DAYS=7;
 // Statuses after which Human Capital has nothing left to do for the contract.
 export const contractDone=status=>/sent\s*to\s*c\s*(&|and|n)?\s*b|resign/i.test(String(status??""));
 function countRows(rows,index){return rows.filter(row=>String(val(row,index)).trim()!=="").length;}
@@ -73,7 +73,7 @@ export const handler = async event => {
     const contractAll=extValues.slice(1).map((row,index)=>({row,rowNumber:3+index})).filter(({row})=>[9,4].some(i=>row[i]!==undefined&&row[i]!==null&&row[i]!=="")).map(({row,rowNumber})=>{
       const date=parseDate(val(row,endDate));if(!date)return null;
       const status=String(val(row,extStatus)||"").trim(),done=contractDone(status),daysRemaining=Math.ceil((date-today)/86400000);
-      return {rowNumber,employee:String(val(row,extName)||"—"),employeeId:String(val(row,extId)||"—"),businessUnit:String(val(row,extBU)||"—"),position:String(val(row,extPosition)||"—"),status,done,daysRemaining,endDate:dateLabel(date),
+      return {rowNumber,details:extension.headers.map((label,i)=>({label,value:String(row[i]??"").trim()})).filter(item=>item.label&&item.value),employee:String(val(row,extName)||"—"),employeeId:String(val(row,extId)||"—"),businessUnit:String(val(row,extBU)||"—"),position:String(val(row,extPosition)||"—"),status,done,daysRemaining,endDate:dateLabel(date),
         state:done?(/resign/i.test(status)?"closed":"sent"):daysRemaining<0?"overdue":"due"};
     }).filter(Boolean)
       // Next 90 days, plus contracts that ended in the last 30 days and were never marked done.
@@ -86,6 +86,19 @@ export const handler = async event => {
     const upcomingJoiners=newHire.rows.map(row=>({row,date:parseDate(val(row,nhJoin))})).filter(item=>item.date).map(({row,date})=>({
       name:String(val(row,nhName)||"—"),employeeId:String(val(row,nhId)||""),position:String(val(row,nhPosition)||"—"),businessUnit:String(val(row,nhBU)||"—"),contract:String(val(row,nhContract)||""),joinDate:dateLabel(date),daysUntil:Math.ceil((date-today)/86400000)
     })).filter(item=>item.daysUntil>=0&&item.daysUntil<=JOIN_WINDOW_DAYS).sort((a,b)=>a.daysUntil-b.daysUntil||a.name.localeCompare(b.name)).slice(0,50);
+
+    // Interviews scheduled in the next 7 days (2026 Rec Pipeline, columns 1st Intv / 2nd Intv), for requests still running.
+    const ivCode=col(rfp.headers,"RFP Code"),ivPosition=col(rfp.headers,"Position"),ivBU=col(rfp.headers,"Business Unit"),ivCandidate=col(rfp.headers,"Candidates"),ivProcess=col(rfp.headers,"RFP Process"),ivOutcome=col(rfp.headers,"Status");
+    const upcomingInterviews=[];
+    for(const row of rfp.rows){
+      if(/fail|gagal/i.test(String(val(row,ivOutcome)))||/complet|done|closed|selesai|cancel/i.test(String(val(row,ivProcess))))continue;
+      for(const [header,round] of [["1st Intv","1st Interview"],["2nd Intv","2nd Interview"]]){
+        const date=parseDate(val(row,col(rfp.headers,header)));if(!date)continue;
+        const daysUntil=Math.ceil((date-today)/86400000);if(daysUntil<0||daysUntil>INTERVIEW_WINDOW_DAYS)continue;
+        upcomingInterviews.push({round,candidate:String(val(row,ivCandidate)||"").trim(),position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),rfpCode:String(val(row,ivCode)||""),date:dateLabel(date),daysUntil});
+      }
+    }
+    upcomingInterviews.sort((a,b)=>a.daysUntil-b.daysUntil||a.position.localeCompare(b.position));
 
     const movementReason=col(movement.headers,"REASON");
     const movementCounts={newHire:0,resignation:0,termination:0,retirement:0};
@@ -105,7 +118,7 @@ export const handler = async event => {
       },
       completion:{rfp:dashboardMetrics.rfpRate,newHire:dashboardMetrics.newHireRate,extension:dashboardMetrics.extensionRate,rfpCompleted:dashboardMetrics.rfpCompleted,newHireCompleted:dashboardMetrics.newHireCompleted,extensionCompleted:dashboardMetrics.extensionCompleted},
       contractAlerts,contractSummary:{needAction:contractAll.filter(x=>!x.done).length,overdue:contractAll.filter(x=>x.state==="overdue").length,done:contractAll.filter(x=>x.done).length,windowDays:CONTRACT_WINDOW_DAYS},
-      upcomingJoiners,joinWindowDays:JOIN_WINDOW_DAYS,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
+      upcomingJoiners,joinWindowDays:JOIN_WINDOW_DAYS,upcomingInterviews:upcomingInterviews.slice(0,50),interviewWindowDays:INTERVIEW_WINDOW_DAYS,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
       latestActivities:activities.slice(0,5),activityHistory:activities,warnings,
       dataBasis:{rfp:"2026 Rec Pipeline",newHire:"New Hire 2026",extension:"Extend 2026",employees:"Data Valid Employees",movement:"New Hire vs Exit",tpc:"2026 TPC Pipeline"}
     });

@@ -24,3 +24,24 @@ Built on the v10 build. Adds `netlify/functions/contracts.mjs`, changes `dashboa
 - `node --check` passes for `dashboard.mjs`, `contracts.mjs`, `public/app.js`.
 - Exercised in Chrome against an in-memory spreadsheet stub running the real `dashboard.mjs` and `contracts.mjs`: due, overdue, sent and resign rows, marking Sent to C&B and Resign, changed-row refusal, joiners window, 390px viewport.
 - Not exercised against the live Google Sheet. Header names come from `docs/crud-schema.json`.
+
+## Upcoming Interviews (added after the first reminders build)
+- Source: `2026 Rec Pipeline`, columns `1st Intv` and `2nd Intv`. Lists interviews dated today through the next 7 days, soonest first, with a 1st/2nd tag, candidate, position, business unit and RFP code.
+- Rows whose `Status` is Failed or whose `RFP Process` is completed or cancelled are left out.
+- An interview appears here once its date is set, for example by moving a card to 1st Interview on the Hiring Pipeline board with a future date.
+
+## Layout and wording
+- Order of the Overview panels: Upcoming Contract End Dates and Upcoming Interviews first, then Latest RFP Records and Activity Log, then Joining Soon and Activity History.
+- Panels with nothing to show use an empty state, and their count pill is hidden.
+- Explanatory subtitles and source footers were removed from the contract, interview and joining panels; each keeps only its time window. The overdue count moved into the contract panel's pill.
+
+## Later layout changes
+- Panel order: contracts and interviews, then Latest RFP Records and Joining Soon, then Activity Log and Activity History side by side.
+- Activity Log and Activity History are collapsible and closed by default. The open or closed state is remembered per browser in `localStorage` (`emp-collapsed`). The "View 10-day history" link was removed because the two panels now sit next to each other.
+- In the contract panel, "Sent to C&B" is an icon button with a tooltip; the other status stays in the `...` menu.
+- Icon-only row actions across the app now show an in-app tooltip instead of the browser's native one.
+
+## Contract details
+- The row action for Sent to C&B is a check icon (with tooltip), not a send icon.
+- Clicking a contract row, or "View details" in its `...` menu, opens a dialog with every filled column of that row from `Extend 2026`, the end date and the current status.
+- The dialog has a `Sent to C&B` button and a `Mark as Resign` link for rows that still need action. Using them there does not ask for a second confirmation; the row icon still does.
