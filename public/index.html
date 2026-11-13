@@ -3,39 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f4f6f3">
+  <meta name="theme-color" content="#f3f6f4">
+  <script>try{var t=localStorage.getItem("emp-theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.dataset.theme=t}catch(e){document.documentElement.dataset.theme="light"}</script>
   <title>EMP | Human Capital Services</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div id="loginView" class="login-shell">
+    <div class="login-theme"><button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Dark mode" title="Light / dark mode"><span class="tt-ico sun" data-icon="sun"></span><span class="tt-ico moon" data-icon="moon"></span><i class="tt-knob"></i></button></div>
     <section class="login-card">
       <div class="login-brand"><span class="brand-mark">e</span><div><b>emp<span>.</span></b><small>Human Capital Services</small></div></div>
       <div class="login-content">
-        <div class="eyebrow">WELCOME BACK</div>
+        
         <h1>Sign in</h1>
         <p>Access your Human Capital workspace.</p>
         <form id="loginForm">
           <label>Username<input id="loginUsername" name="username" autocomplete="username" required placeholder="Enter your username"></label>
           <label>Password<div class="password-wrap"><input id="loginPassword" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"><button type="button" id="togglePassword" aria-label="Show password"><span data-icon="eye"></span></button></div></label>
           <div id="loginError" class="form-error" hidden></div>
-          <button class="primary-button login-submit" id="loginButton" type="submit">Sign In <span>→</span></button>
+          <button class="primary-button login-submit" id="loginButton" type="submit">Sign in <span data-icon="arrow-right"></span></button>
         </form>
         <div class="login-foot"><span class="secure-dot"></span> Secure EMP workspace</div>
       </div>
     </section>
     <aside class="login-aside">
       <div class="aside-glow"></div>
-      <div class="aside-top"><span class="mini-pill">HCS WORKSPACE</span><span class="aside-year">2026</span></div>
-      <div class="aside-copy"><div class="eyebrow">PEOPLE · PROCESS · PERFORMANCE</div><h2>Make people operations<br><em>work better.</em></h2><p>A clearer view of your Human Capital operations, team activity, and important workforce milestones.</p></div>
+      <div class="aside-top"><span class="mini-pill">HCS workspace</span><span class="aside-year">2026</span></div>
+      <div class="aside-copy"><h2>Make people operations work better.</h2><p>A clearer view of your Human Capital operations, team activity, and important workforce milestones.</p></div>
       <div class="preview-window">
         <div class="preview-head"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span><small>EMP / Overview</small></div>
         <div class="preview-stats"><div><small>RFP Records</small><b>—</b><i>Workbook summary</i></div><div><small>New Hire</small><b>—</b><i>Workbook summary</i></div><div><small>Extension</small><b>—</b><i>Workbook summary</i></div></div>
         <div class="preview-chart"><div class="chart-title"><b>Workforce activity</b><small>Overview</small></div><div class="bars"><i style="height:34%"></i><i style="height:51%"></i><i style="height:43%"></i><i style="height:69%"></i><i style="height:57%"></i><i style="height:84%"></i><i style="height:72%"></i><i style="height:95%"></i><i style="height:67%"></i><i style="height:80%"></i><i style="height:59%"></i><i style="height:91%"></i></div></div>
-        <div class="preview-activity"><span class="activity-bullet"></span><div><b>Employee record updated</b><small>Human Capital · Just now</small></div><span class="preview-tag">SYNCED</span></div>
+        <div class="preview-activity"><span class="activity-bullet"></span><div><b>Employee record updated</b><small>Human Capital · Just now</small></div><span class="preview-tag">Synced</span></div>
       </div>
       <div class="aside-bottom"><span>EMP · Human Capital Services</span><span>Internal workspace</span></div>
     </aside>
@@ -43,21 +45,22 @@
 
   <div id="appView" class="app-shell" hidden>
     <aside class="sidebar" id="sidebar">
-      <div class="brand"><span class="brand-mark">e</span><div><b>emp<span>.</span></b><small>Human Capital Services</small></div></div>
-      <div class="nav-caption">WORKSPACE</div>
-      <button class="nav-item active" data-page="overview"><span class="nav-icon" data-icon="layout-dashboard"></span><span>Overview</span></button>
-      <div id="dataNav" class="source-navigation"></div>
-      <div class="nav-caption">SYSTEM MANAGEMENT</div>
-      <button class="nav-item" data-page="users"><span class="nav-icon" data-icon="users"></span><span>User Management</span></button>
+      <div class="brand"><span class="brand-mark">e</span><div class="brand-copy"><b>emp<span>.</span></b><small>Human Capital Services</small></div></div>
+      <label class="nav-find"><span data-icon="search"></span><input id="navFind" placeholder="Find a sheet" autocomplete="off" aria-label="Find a sheet"><kbd>/</kbd></label>
+      <div class="nav-scroll">
+        <button class="nav-item active" data-page="overview" title="Overview"><span class="nav-icon" data-icon="layout-dashboard"></span><span class="nav-label">Overview</span></button>
+        <div id="dataNav" class="source-navigation"></div>
+        <div class="nav-group"><button class="nav-caption" type="button"><span data-icon="chevron-down"></span><span class="cap-label">System management</span></button><div class="nav-items"><div><button class="nav-item" data-page="users" title="User Management"><span class="nav-icon" data-icon="users"></span><span class="nav-label">User Management</span></button></div></div></div>
+      </div>
       <div class="sidebar-bottom">
-        <div class="connection"><span class="status-dot"></span>Google Sheets connected</div>
-        <div class="profile-mini"><div class="avatar" id="profileInitial">A</div><div class="profile-copy"><b id="profileName">Admin</b><small id="profileRole">Administrator</small></div><button id="logoutButton" class="logout-button" title="Sign out"><span data-icon="log-out"></span></button></div>
+        <div class="connection"><span class="status-dot"></span><span>Google Sheets connected</span></div>
+        <div class="profile-mini"><div class="avatar" id="profileInitial">A</div><div class="profile-copy"><b id="profileName">Admin</b><small id="profileRole">Administrator</small></div><button id="logoutButton" class="logout-button" title="Sign out" aria-label="Sign out"><span data-icon="log-out"></span></button></div>
       </div>
     </aside>
     <main class="main">
-      <header class="topbar"><button class="mobile-menu" id="mobileMenu" aria-label="Open navigation"><span data-icon="menu"></span></button><div class="breadcrumb"><span>EMP</span><i>/</i><b id="breadcrumbCurrent">Overview</b></div><div class="top-actions"><span id="todayLabel"></span><button class="icon-button" id="refreshButton" title="Refresh"><span data-icon="refresh-cw"></span></button><div class="top-avatar" id="topInitial">A</div></div></header>
+      <header class="topbar"><button class="icon-button" id="mobileMenu" aria-label="Toggle sidebar" title="Toggle sidebar"><span data-icon="panel-left"></span></button><div class="breadcrumb"><span>EMP</span><i>/</i><b id="breadcrumbCurrent">Overview</b></div><div class="top-actions"><span id="todayLabel"></span><button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data"><span data-icon="refresh-cw"></span></button><button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Dark mode" title="Light / dark mode"><span class="tt-ico sun" data-icon="sun"></span><span class="tt-ico moon" data-icon="moon"></span><i class="tt-knob"></i></button><div class="top-avatar" id="topInitial">A</div></div></header>
       <section class="page active" id="page-overview">
-        <div class="page-heading"><div><div class="eyebrow">HUMAN CAPITAL SERVICES</div><h1>Overview</h1><p>Your HCS operations at a glance.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Main spreadsheet · Read only</span><span id="lastUpdated">—</span></div></div>
+        <div class="page-heading"><div><h1>Overview</h1><p>Your HCS operations at a glance.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Main spreadsheet · Read only</span><span id="lastUpdated">—</span></div></div>
         <div class="metric-grid">
           <article class="metric-card"><div class="metric-top"><span>RFP Records</span><span class="metric-icon green" data-icon="clipboard-list"></span></div><strong id="metricNewHire">—</strong><small id="metricRfpCaption">Completed records</small></article>
           <article class="metric-card"><div class="metric-top"><span>New Hire Records</span><span class="metric-icon amber" data-icon="user-plus"></span></div><strong id="metricContract">—</strong><small id="metricHireCaption">Completed records</small></article>
@@ -65,27 +68,26 @@
           <article class="metric-card"><div class="metric-top"><span>Employee Exit</span><span class="metric-icon violet" data-icon="git-compare-arrows"></span></div><strong id="metricYear">—</strong><small id="yearCaption">Resignation · Termination · Retirement</small></article>
         </div>
         <div class="dashboard-grid">
-          <section class="panel"><div class="panel-heading"><div><h2>Upcoming Contract End Dates</h2><p>Records from Extend 2026 with end dates in the next 90 days</p></div><span class="count-pill amber" id="contractCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>BUSINESS UNIT</th><th>CONTRACT END</th><th>REMAINING</th></tr></thead><tbody id="contractRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>Source: Extend 2026</span><span>Next 90 days</span></div></section>
-          <section class="panel"><div class="panel-heading"><div><h2>Latest RFP Records</h2><p>Latest requests received in the current year</p></div><span class="count-pill blue" id="rfpCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>RFP / POSITION</th><th>BUSINESS UNIT</th><th>CONTRACT</th><th>PROCESS</th></tr></thead><tbody id="rfpRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>Source: 2026 Rec Pipeline</span><span id="rfpYearCaption">Current year</span></div></section>
-          <section class="panel"><div class="panel-heading"><div><h2>Activity Log</h2><p>Latest actions performed in EMP</p></div><button class="text-button" id="viewHistory">View 10-day history ↗</button></div><div id="latestActivity" class="activity-list"><div class="empty-state">No activity recorded.</div></div></section>
-          <section class="panel" id="historyPanel"><div class="panel-heading"><div><h2>Activity History</h2><p>Audit trail from the last 10 days</p></div><span class="count-pill neutral">10 DAYS</span></div><div id="historyList" class="activity-list"><div class="empty-state">No history recorded.</div></div></section>
+          <section class="panel"><div class="panel-heading"><div><h2>Upcoming Contract End Dates</h2><p>Records from Extend 2026 with end dates in the next 90 days</p></div><span class="count-pill amber" id="contractCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>Employee</th><th>Business unit</th><th>Contract end</th><th>Remaining</th></tr></thead><tbody id="contractRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>Source: Extend 2026</span><span>Next 90 days</span></div></section>
+          <section class="panel"><div class="panel-heading"><div><h2>Latest RFP Records</h2><p>Latest requests received in the current year</p></div><span class="count-pill blue" id="rfpCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>RFP / position</th><th>Business unit</th><th>Contract</th><th>Process</th></tr></thead><tbody id="rfpRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>Source: 2026 Rec Pipeline</span><span id="rfpYearCaption">Current year</span></div></section>
+          <section class="panel"><div class="panel-heading"><div><h2>Activity Log</h2><p>Latest actions performed in EMP</p></div><button class="text-button" id="viewHistory">View 10-day history <span data-icon="arrow-up-right"></span></button></div><div id="latestActivity" class="activity-list"><div class="empty-state">No activity recorded.</div></div></section>
+          <section class="panel" id="historyPanel"><div class="panel-heading"><div><h2>Activity History</h2><p>Audit trail from the last 10 days</p></div><span class="count-pill neutral">Last 10 days</span></div><div id="historyList" class="activity-list"><div class="empty-state">No history recorded.</div></div></section>
         </div>
         <div class="warning-box" id="warningBox" hidden></div>
       </section>
 
       <section class="page" id="page-data">
-        <div class="page-heading"><div><div class="eyebrow" id="dataGroup">DATA SOURCE</div><h1 id="dataTitle">Data</h1><p id="dataSubtitle">Read-only view of the connected Google Sheets source.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Read-only source</span><span id="dataUpdated">—</span></div></div>
-        <div class="data-toolbar"><div class="search-box"><span data-icon="search"></span><input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="secondary-button" id="dataRefresh"><span data-icon="refresh-cw"></span> Refresh data</button></div></div>
-        <div class="data-source-meta" id="dataSourceMeta"></div>
+        <div class="page-heading"><div><span class="group-chip" id="dataGroup">Data source</span><h1 id="dataTitle">Data</h1><p id="dataSubtitle">Read-only view of the connected Google Sheets source.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Read-only source</span><span id="dataUpdated">—</span></div></div>
+        <div class="data-toolbar"><div class="search-box"><span data-icon="search"></span><input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-source-meta" id="dataSourceMeta"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="secondary-button" id="dataRefresh"><span data-icon="refresh-cw"></span> Refresh</button></div></div>
         <section class="panel"><div class="table-scroll data-table-scroll"><table id="sourceTable"><thead id="sourceTableHead"></thead><tbody id="sourceTableBody"><tr><td class="empty-cell">Select a data source.</td></tr></tbody></table></div></section>
-        <div class="data-pagination"><span id="dataPageInfo">—</span><div><button class="secondary-button" id="dataPrev">Previous</button><button class="secondary-button" id="dataNext">Next</button></div></div>
+        <div class="data-pagination"><span id="dataPageInfo">—</span><div><button class="secondary-button" id="dataPrev"><span data-icon="chevron-left"></span> Previous</button><button class="secondary-button" id="dataNext">Next <span data-icon="chevron-right"></span></button></div></div>
         <div class="warning-box" id="dataError" hidden></div>
       </section>
       <section class="page" id="page-users">
-        <div class="page-heading"><div><div class="eyebrow">ACCESS & PERMISSIONS</div><h1>User Management</h1><p>Manage accounts allowed to access EMP.</p></div><button class="primary-button" id="addUserButton"><span data-icon="plus"></span> Add User</button></div>
+        <div class="page-heading"><div><h1>User Management</h1><p>Manage accounts allowed to access EMP.</p></div><button class="primary-button" id="addUserButton"><span data-icon="plus"></span> Add User</button></div>
         <div class="user-summary"><div class="summary-tile"><span>Total Users</span><b id="usersTotal">—</b></div><div class="summary-tile"><span>Active</span><b id="usersActive">—</b></div><div class="summary-tile"><span>Admins</span><b id="usersAdmins">—</b></div></div>
-        <section class="panel"><div class="panel-heading users-heading"><div><h2>Workspace Users</h2><p>Accounts and access permissions.</p></div><div class="search-box"><span data-icon="search"></span><input id="userSearch" placeholder="Search username or name…"></div></div><div class="table-scroll"><table><thead><tr><th>USER</th><th>ROLE</th><th>STATUS</th><th>LAST UPDATED</th><th></th></tr></thead><tbody id="userRows"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
-        <div class="info-note"><b>ⓘ</b><div><strong>Admin-first release</strong><p>Only active Admin accounts can access this first release. Additional roles can be enabled in a later phase.</p></div></div>
+        <section class="panel"><div class="panel-heading users-heading"><div><h2>Workspace Users</h2><p>Accounts and access permissions.</p></div><div class="search-box"><span data-icon="search"></span><input id="userSearch" placeholder="Search username or name…"></div></div><div class="table-scroll"><table><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last updated</th><th></th></tr></thead><tbody id="userRows"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
+        <div class="info-note"><span data-icon="info"></span><div><strong>Admin-first release</strong><p>Only active Admin accounts can access this first release. Additional roles can be enabled in a later phase.</p></div></div>
       </section>
     </main>
   </div>
