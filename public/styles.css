@@ -163,3 +163,36 @@ tbody tr:has(.empty-cell){--rowbg:transparent!important}.empty-cell{text-align:c
 .sidebar{width:260px;transform:translateX(-105%);box-shadow:8px 0 30px rgba(0,0,0,.2)}.sidebar.open{transform:none}.main{margin-left:0;padding:0 12px 12px}.topbar{margin:0 -12px;padding:0 12px}.top-actions>span,.heading-meta,.data-source-meta{display:none}
 .page-heading p{display:none}.metric-card>strong{font-size:22px}.data-toolbar{flex-wrap:wrap}.data-toolbar .search-box{flex:1;width:auto}.users-heading{flex-direction:column;align-items:stretch}.users-heading .search-box{width:100%}.user-summary{gap:6px}.summary-tile{flex-direction:column;gap:2px;padding:8px 10px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+
+/* Spreadsheet CRUD — aligned with the existing EMP component system */
+#sourceTable .row-actions-head{position:sticky;right:0;z-index:4;text-align:right;min-width:92px}
+#sourceTable td.row-actions-cell{position:sticky;right:0;z-index:2;background:var(--solid);min-width:92px;padding:6px 10px}
+#sourceTable td.row-actions-cell .icon-button{width:30px;height:30px;padding:0;border-radius:8px}
+#sourceTable td.row-actions-cell .icon-button.danger{color:var(--danger)}
+#sourceTable td.row-actions-cell .icon-button.danger:hover{background:var(--danger-bg);border-color:var(--danger-line)}
+.table-link{display:inline-flex;align-items:center;gap:6px;color:var(--brand-ink);font-size:11px;font-weight:600;text-decoration:none;white-space:nowrap}
+.table-link:hover{text-decoration:underline}
+.payment-badge{display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:650}
+.payment-badge.paid{color:var(--green-ink);background:var(--green-bg)}
+.payment-badge.unpaid{color:var(--amber-ink);background:var(--amber-bg)}
+.cell-empty{color:var(--faint)}
+.record-modal{width:min(760px,100%);max-height:min(88dvh,900px);overflow:auto}
+.record-modal .modal-header{position:sticky;top:-20px;z-index:2;background:var(--solid);padding:2px 0 12px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.record-modal .modal-header .eyebrow{display:block;color:var(--muted);font-size:9px;font-weight:700;letter-spacing:1px;margin-bottom:4px}
+.record-modal .modal-header h2{font-size:19px}
+.modal-subtitle{font-size:11px;color:var(--muted);margin:4px 0 0}
+.record-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;margin:14px 0}
+.record-field{display:flex;flex-direction:column;gap:6px;min-width:0;color:var(--ink-2);font-size:11px;font-weight:600}
+.record-field>span{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.record-field small{font-size:9px;color:var(--muted);font-weight:400}
+.record-field input,.record-field select{width:100%;height:38px;padding:0 11px;border:1px solid var(--line-2);border-radius:var(--r-s);background:var(--surface);color:var(--ink);font:inherit;font-size:12px;outline:none}
+.record-field input:focus,.record-field select:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.record-modal .modal-note{margin:12px 0}
+.record-modal .modal-actions{position:sticky;bottom:-20px;background:var(--solid);padding:12px 0 2px;margin-top:12px;border-top:1px solid var(--line)}
+.record-modal .form-error{margin-top:10px}
+@media(max-width:640px){
+ .record-modal{padding:16px;max-height:92dvh}
+ .record-form-grid{grid-template-columns:1fr;gap:10px}
+ #sourceTable td.row-actions-cell{position:sticky;right:0}
+}

@@ -78,7 +78,7 @@
 
       <section class="page" id="page-data">
         <div class="page-heading"><div><span class="group-chip" id="dataGroup">Data source</span><h1 id="dataTitle">Data</h1><p id="dataSubtitle">Read-only view of the connected Google Sheets source.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Read-only source</span><span id="dataUpdated">—</span></div></div>
-        <div class="data-toolbar"><div class="search-box"><span data-icon="search"></span><input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-source-meta" id="dataSourceMeta"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="secondary-button" id="dataRefresh"><span data-icon="refresh-cw"></span> Refresh</button></div></div>
+        <div class="data-toolbar"><div class="search-box"><span data-icon="search"></span><input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-source-meta" id="dataSourceMeta"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="primary-button" id="addRecordButton" hidden><span data-icon="plus"></span> Add record</button><button class="secondary-button" id="dataRefresh"><span data-icon="refresh-cw"></span> Refresh</button></div></div>
         <section class="panel"><div class="table-scroll data-table-scroll"><table id="sourceTable"><thead id="sourceTableHead"></thead><tbody id="sourceTableBody"><tr><td class="empty-cell">Select a data source.</td></tr></tbody></table></div></section>
         <div class="data-pagination"><span id="dataPageInfo">—</span><div><button class="secondary-button" id="dataPrev"><span data-icon="chevron-left"></span> Previous</button><button class="secondary-button" id="dataNext">Next <span data-icon="chevron-right"></span></button></div></div>
         <div class="warning-box" id="dataError" hidden></div>
@@ -93,6 +93,13 @@
   </div>
 
   <div class="modal-backdrop" id="userModal" hidden><div class="modal"><div class="modal-header"><div><div class="eyebrow">WORKSPACE ACCESS</div><h2 id="modalTitle">Add User</h2></div><button class="close-button" id="closeModal" aria-label="Close"><span data-icon="x"></span></button></div><form id="userForm"><label>Username<input id="userUsername" required minlength="3" maxlength="40" autocomplete="off"></label><label>Full Name<input id="userFullName" required maxlength="100"></label><label id="passwordLabel">Password<input id="userPassword" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters"></label><div class="form-row"><label>Role<select id="userRole"><option value="Admin">Admin</option></select></label><label>Status<select id="userStatus"><option>Active</option><option>Inactive</option></select></label></div><div class="modal-note">Passwords are hashed on the server. Leave password blank when editing to keep the current password.</div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelModal">Cancel</button><button class="primary-button" id="saveUserButton">Save User</button></div><div id="formError" class="form-error" hidden></div></form></div></div>
+
+  <div class="modal-backdrop" id="recordModal" hidden>
+    <div class="modal record-modal" role="dialog" aria-modal="true" aria-labelledby="recordModalTitle">
+      <div class="modal-header"><div><div class="eyebrow">SPREADSHEET RECORD</div><h2 id="recordModalTitle">Add record</h2><p class="modal-subtitle" id="recordModalSubtitle"></p></div><button class="close-button" id="closeRecordModal" type="button" aria-label="Close"><span data-icon="x"></span></button></div>
+      <form id="recordForm"><div class="record-form-grid" id="recordFields"></div><div class="modal-note" id="recordModalNote">Changes are saved directly to the connected Google Spreadsheet.</div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelRecordModal">Cancel</button><button class="primary-button" id="saveRecordButton">Save record</button></div><div id="recordFormError" class="form-error" hidden></div></form>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
   <script src="/app.js" defer></script>
 </body>
