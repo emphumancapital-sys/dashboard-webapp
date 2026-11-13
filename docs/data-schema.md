@@ -1,30 +1,35 @@
-# EMP Phase 1 — Data Schema
+# EMP Phase 1 — Workbook schema reference
 
-## Existing master sheets (read-only)
+The authoritative source for the current release is the uploaded `Recruitment Pipeline.xlsx` workbook. The app uses exact tab names and explicit header/data row positions; it does not inherit legacy Apps Script mappings.
 
-The current backend defaults to these sheet names, based on the legacy workbook configuration:
-- 2026 Rec Pipeline
-- SPK 2026
-- MCU 2026
-- MCU Induction 2026
-- New Hire 2026
-- Extend 2026
-- Resignation 2026
-- Termination 2026
-- Retirement 2026
-- Master All
-- New Hire vs Exit
-- Pivot Dashboard 2026
+## Operational and report tabs
 
-Phase 1 dashboard currently reads:
-- `2026 Rec Pipeline`
-- `New Hire 2026`
-- `Extend 2026`
-- `Resignation 2026`
-- `Termination 2026`
-- `Retirement 2026`
+| UI label | Spreadsheet tab | Header row | Data start row | Notes |
+|---|---|---:|---:|---|
+| Request for Personnel | `2026 Rec Pipeline` | 1 | 2 | 35 columns, A:AI |
+| Psychotest (SPK) | `SPK 2026` | 1 | 2 | 17 columns, A:Q |
+| Medical Check Up (MCU) | `MCU 2026` | 1 | 2 | 16 populated headers, A:P |
+| MCU Induction | `MCU Induction 2026` | 1 | 2 | Header contains `#REF!`; table withheld |
+| Contract Extension | `Extend 2026` | 2 | 3 | 21 columns, A:U |
+| New Hire | `New Hire 2026` | 1 | 2 | 17 columns, A:Q |
+| TPC Pipeline | `2026 TPC Pipeline` | 1 | 2 | 21 columns, A:U |
+| Offer Tracking | `Offer` | 2 | 3 | Mixed title/value and headers; table withheld |
+| Employee Database | `Data Valid Employees` | 3 | 4 | Row 1–2 are summary information; 14 columns, A:N |
+| New Hire vs Exit | `New Hire vs Exit` | 1 | 2 | Primary data table A:C |
+| Pivot Dashboard 2026 | `Pivot Dashboard 2026` | 3 | 4 | Summary blocks in AX:BC |
+| RFP Deletion Log | `RFP Deletion` | 1 | 2 | Incomplete header cells retained as generated column labels |
+| Resource Deletion Log | `Resource Deletion` | 1 | 2 | Incomplete header cells retained as generated column labels |
 
-No existing master tab is edited.
+## Overview KPI source
+
+The Overview uses the `Dashboard 2026` worksheet's summary area (`B5:L25`) for these workbook-defined measures:
+
+- All RFP, completed RFP, and completion rate
+- All New Hire, completed New Hire, and completion rate
+- All Extension, completed Extension, and completion rate
+- Resignation, Termination, and Retirement counts
+
+The Overview's recent RFP and upcoming contract-end tables are sourced from `2026 Rec Pipeline` and `Extend 2026`, respectively.
 
 ## System-owned tabs
 
@@ -51,14 +56,4 @@ No existing master tab is edited.
 | Record ID | Username |
 | Summary | Change summary |
 
-## Header matching
-
-Contract end date candidates include `Contract End Date`, `End Date`, `Contract Expiry`, `Expiry Date`, `Tanggal Akhir Kontrak`, `Tanggal Berakhir Kontrak`, and `PKWT End`.
-
-RFP request date candidates include `Request Date`, `RFP Date`, `Tanggal Request`, `Tanggal RFP`, `Received Date`, and `Open Date`.
-
-RFP recruitment type candidates include `Recruitment Type`, `Request Type`, `Contract Type`, `Jenis Recruitment`, and `Employment Type`.
-
-Only `PKWT Addition`, `PKWT Replacement`, and `TPC to PKWT` are included in RFP aging. Alerts are shown at age >= 30 days.
-
-Confirm exact spreadsheet headers before using these metrics as operational triggers.
+External Talent Database and Training workbooks are out of scope for this release.

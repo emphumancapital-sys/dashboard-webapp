@@ -1,140 +1,81 @@
-# EMP — Human Capital Services | Netlify + GitHub (Phase 1)
+# EMP — Human Capital Services
 
-This is a standalone web application. **Google Apps Script is not used.**
+Standalone web application built with GitHub, Netlify Functions, and Google Sheets API. Google Apps Script is not used.
+
+## Current release scope
+
+- Admin sign-in and User Management.
+- Read-only data browser for the current `Recruitment Pipeline.xlsx` workbook.
+- Overview KPIs read from the workbook's `Dashboard 2026` summary area.
+- Read-only operational tabs and report/log tabs listed in `docs/data-schema.md`.
+- External Talent Database and Training workbooks are intentionally out of scope.
+- No operational source-sheet writes, edits, deletes, imports, or exports.
 
 ## Architecture
 
-* GitHub: source-code repository
-* Netlify: static hosting and serverless API functions
-* Google Sheets API: reads the existing HCS workbook and stores EMP system users/activity
-* Browser: talks only to Netlify Functions; Google credentials never reach the browser
+- `public/`: static interface (HTML, CSS, vanilla JavaScript).
+- `netlify/functions/`: server-side endpoints.
+- `netlify/functions/_lib/sheets.mjs`: Google Sheets API client, request coalescing, retry, and short-lived warm-instance cache.
+- Google service-account credentials remain in Netlify environment variables and are never sent to the browser.
 
-## Included in Phase 1
+## Environment variables
 
-* Sign-in page
-* Admin-only Overview
-* User Management
-* Contract expiry dashboard alert (next 90 days)
-* RFP aging dashboard alert (30+ days for PKWT Addition, PKWT Replacement, TPC to PKWT)
-* Activity Log and 10-day history
-* Mobile-responsive layout
+Set these in Netlify Site configuration → Environment variables:
 
-## Important: bootstrap admin credentials
+| Variable | Purpose |
+|---|---|
+| `GOOGLE_SHEET_ID` | Main workbook ID; default is already configured in code |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Full service-account JSON, stored as a secret |
+| `JWT_SECRET` | Random secret of at least 32 characters |
+| `BOOTSTRAP_ADMIN_USERNAME` | Optional initial admin username |
+| `BOOTSTRAP_ADMIN_PASSWORD` | Optional initial admin password |
+| `SESSION_COOKIE_NAME` | Optional session cookie name; defaults to `emp_session` |
 
-The first admin is created from Netlify environment variables:
+Never commit `.env` or service-account credentials. The service account needs Editor access only because User Management and Activity Log are system-owned writable tabs; the operational/report tabs are read-only.
 
-* `BOOTSTRAP\_ADMIN\_USERNAME`
-* `BOOTSTRAP\_ADMIN\_PASSWORD`
+## Google Cloud setup
 
-The example values in `.env.example` are placeholders. If you choose `admin` / `admin` for a local-only smoke test, replace them with a strong password before any public deployment. The app hashes passwords with Node.js `scrypt`; plaintext passwords are not written to the spreadsheet.
+1. Enable Google Sheets API in the Google Cloud project used by the service account.
+2. Create a service account and a JSON key.
+3. Share the main workbook with the service-account email.
+4. Store the JSON key in Netlify as `GOOGLE_SERVICE_ACCOUNT_JSON`.
 
-## 1\. Google Cloud setup (one-time)
+## Deploy
 
-1. Open Google Cloud Console and create/select a project.
-2. Enable **Google Sheets API**.
-3. Create a Service Account and generate a JSON key.
-4. Copy the service-account email.
-5. Share the existing spreadsheet with that email as **Editor**.
-6. Keep the JSON key private. Do not upload it to GitHub.
+1. Extract this ZIP into the repository root.
+2. Commit and push the files to the intended branch.
+3. Connect the repository to Netlify.
+4. Build command: `npm run build`.
+5. Publish directory: `public`.
+6. Functions directory: `netlify/functions` (configured in `netlify.toml`).
+7. Configure the environment variables and deploy.
 
-The spreadsheet ID is already set as the default from the link supplied in the project. You can override it with `GOOGLE\_SHEET\_ID`.
-
-## 2\. Create GitHub repository
-
-1. Create an empty repository.
-2. Extract this ZIP.
-3. Upload all files and folders at the repository root (not the ZIP itself).
-4. Commit: `Initial EMP Netlify Phase 1`.
-
-## 3\. Deploy to Netlify
-
-1. In Netlify choose **Add new site → Import an existing project**.
-2. Connect the GitHub repository.
-3. Build command: `npm run build`
-4. Publish directory: `public`
-5. Netlify reads `netlify.toml` for Functions directory.
-
-## 4\. Configure Netlify environment variables
-
-In Netlify → Site configuration → Environment variables, add:
-
-|Variable|Value|
-|-|-|
-|`GOOGLE\_SHEET\_ID`|`17Iz\_3lQyCkYLR5E-MyKkyQ\_j21Qwda2zaUJf\_CW2VYk`|
-|`GOOGLE\_SERVICE\_ACCOUNT\_JSON`|Full service-account JSON, minified to one line|
-|`JWT\_SECRET`|Random secret, at least 32 characters|
-|`BOOTSTRAP\_ADMIN\_USERNAME`|Initial admin username|
-|`BOOTSTRAP\_ADMIN\_PASSWORD`|Strong initial admin password|
-
-Optional source-tab overrides:
-
-* `SHEET\_REC\_PIPELINE`
-* `SHEET\_NEW\_HIRE`
-* `SHEET\_EXTEND`
-* `SHEET\_RESIGNATION`
-* `SHEET\_TERMINATION`
-* `SHEET\_RETIREMENT`
-
-After setting variables, trigger a new deploy.
-
-## 5\. First run
-
-The first authenticated request creates two system-owned tabs in the same spreadsheet:
-
-* `EMP User Management`
-* `EMP Activity Log`
-
-It seeds the first Admin from the bootstrap environment variables. The service account must have Editor access because user management and activity log write to these two system tabs.
-
-Existing business master tabs are read-only in Phase 1. Their names, headers, order, and existing rows are not rewritten.
-
-## 6\. Local development
+## Local development
 
 ```bash
 npm install
 cp .env.example .env
-# Fill in valid local values; keep .env private
+# Fill in private values, then:
 npx netlify dev
 ```
 
-Netlify CLI loads local environment variables. Never commit `.env`.
+Do not commit `.env`.
+
+## Data mapping and performance
+
+See `docs/data-schema.md` and `docs/data-integration.md` for exact workbook tabs, header/data rows, schema exceptions, and read strategy.
+
+- Source discovery reads header rows only in one batch request.
+- A full source tab is fetched only when opened.
+- Dashboard reads its required workbook ranges in one batch request.
+- Full-tab values are cached for 60 seconds per warm Netlify Function instance; this is best-effort, not a global persistent cache.
+- Concurrent reads for the same range are coalesced.
+- Search and pagination run on cached data.
+- 429 and transient 5xx errors use bounded exponential backoff.
 
 ## Security notes
 
-* No Google API key or service-account JSON is embedded in frontend code.
-* Session cookie is HttpOnly, Secure, SameSite=Lax, and signed by `JWT\_SECRET`.
-* Passwords are stored as salted scrypt hashes.
-* Only Active Admin users can access the current phase.
-* This starter does not yet include production-grade login throttling, password reset, MFA, or a full security audit. Add these before broad organizational rollout.
-* Use HTTPS (Netlify default) and restrict site access appropriately if the application contains confidential employee information.
-
-## Data mapping notes
-
-Dashboard source tabs default to the names listed above. Header matching is defensive. Confirm exact column labels in the live workbook before relying on contract/RFP alerts operationally. Missing mappings appear as dashboard warnings rather than fabricated values.
-
-## Phase 1 boundary
-
-No employee CRUD, recruitment CRUD, import/export, email reminders, or scheduled automations yet. These are intentionally deferred until the spreadsheet schema is validated. Export/import in later phases must preserve the original master headers and column ordering.
-
-## Phase 1 data-sync hardening (November 2026)
-
-The dashboard endpoint now reads each Phase 1 source independently. A missing or inaccessible tab is reported as a source warning and no longer causes all dashboard metrics to fail. The Overview reports per-tab row counts and the detected header list when a required mapping is missing.
-
-Phase 1 Overview sources:
-
-* `2026 Rec Pipeline` — RFP aging reminders (exact normalized types: PKWT Addition, PKWT Replacement, TPC to PKWT; age >= 30 days).
-* `New Hire 2026` — new-hire record count, join count for current year, contract-end reminders.
-* `Extend 2026` — contract-end reminders.
-* `Resignation 2026`, `Termination 2026`, `Retirement 2026` — movement record counts.
-* `EMP Activity Log` — recent activity (last 10 days).
-
-The original Recruitment Pipeline uses header terminology including `Req Date` / `RFP Received`, `Contract Type`, and `RFP Process`; these are explicitly supported. Date parsing supports Google Sheets serial dates and common `dd/MM/yyyy` values.
-
-Important: the dashboard cannot verify the live workbook from this package alone. After deploying this update, inspect the source diagnostics shown in the Overview. If a source is unavailable, confirm the exact tab name and share the spreadsheet with the service-account email as Viewer (Editor is only needed for system-owned EMP tabs/user management). Do not paste the service-account JSON or secrets into GitHub.
-
-
-
-Development branch: dev/emp-sync-fix
-
-Purpose: Phase 1 data synchronization testing.
-
+- Passwords are salted and hashed using Node.js `scrypt`.
+- Session cookie is HttpOnly, Secure, SameSite=Lax, and signed using `JWT_SECRET`.
+- Only Active Admin users can access the current release.
+- This release does not include login throttling, password reset, MFA, or a full security audit. Restrict site access appropriately because employee data is confidential.

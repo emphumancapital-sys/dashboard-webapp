@@ -20,7 +20,7 @@
         <p>Access your Human Capital workspace.</p>
         <form id="loginForm">
           <label>Username<input id="loginUsername" name="username" autocomplete="username" required placeholder="Enter your username"></label>
-          <label>Password<div class="password-wrap"><input id="loginPassword" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"><button type="button" id="togglePassword" aria-label="Show password">◉</button></div></label>
+          <label>Password<div class="password-wrap"><input id="loginPassword" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password"><button type="button" id="togglePassword" aria-label="Show password"><span data-icon="eye"></span></button></div></label>
           <div id="loginError" class="form-error" hidden></div>
           <button class="primary-button login-submit" id="loginButton" type="submit">Sign In <span>→</span></button>
         </form>
@@ -33,7 +33,7 @@
       <div class="aside-copy"><div class="eyebrow">PEOPLE · PROCESS · PERFORMANCE</div><h2>Make people operations<br><em>work better.</em></h2><p>A clearer view of your Human Capital operations, team activity, and important workforce milestones.</p></div>
       <div class="preview-window">
         <div class="preview-head"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span><small>EMP / Overview</small></div>
-        <div class="preview-stats"><div><small>New Hire</small><b>128</b><i>Records</i></div><div><small>Contract Due</small><b>12</b><i>Next 90 days</i></div><div><small>RFP Aging</small><b>08</b><i>30+ days</i></div></div>
+        <div class="preview-stats"><div><small>RFP Records</small><b>—</b><i>Workbook summary</i></div><div><small>New Hire</small><b>—</b><i>Workbook summary</i></div><div><small>Extension</small><b>—</b><i>Workbook summary</i></div></div>
         <div class="preview-chart"><div class="chart-title"><b>Workforce activity</b><small>Overview</small></div><div class="bars"><i style="height:34%"></i><i style="height:51%"></i><i style="height:43%"></i><i style="height:69%"></i><i style="height:57%"></i><i style="height:84%"></i><i style="height:72%"></i><i style="height:95%"></i><i style="height:67%"></i><i style="height:80%"></i><i style="height:59%"></i><i style="height:91%"></i></div></div>
         <div class="preview-activity"><span class="activity-bullet"></span><div><b>Employee record updated</b><small>Human Capital · Just now</small></div><span class="preview-tag">SYNCED</span></div>
       </div>
@@ -45,29 +45,28 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand"><span class="brand-mark">e</span><div><b>emp<span>.</span></b><small>Human Capital Services</small></div></div>
       <div class="nav-caption">WORKSPACE</div>
-      <button class="nav-item active" data-page="overview"><span class="nav-icon">▦</span>Overview</button>
-      <div class="nav-caption">RECRUITMENT & STAFFING</div>
-      <div id="dataNav"></div>
+      <button class="nav-item active" data-page="overview"><span class="nav-icon" data-icon="layout-dashboard"></span><span>Overview</span></button>
+      <div id="dataNav" class="source-navigation"></div>
       <div class="nav-caption">SYSTEM MANAGEMENT</div>
-      <button class="nav-item" data-page="users"><span class="nav-icon">♙</span>User Management</button>
+      <button class="nav-item" data-page="users"><span class="nav-icon" data-icon="users"></span><span>User Management</span></button>
       <div class="sidebar-bottom">
         <div class="connection"><span class="status-dot"></span>Google Sheets connected</div>
-        <div class="profile-mini"><div class="avatar" id="profileInitial">A</div><div class="profile-copy"><b id="profileName">Admin</b><small id="profileRole">Administrator</small></div><button id="logoutButton" class="logout-button" title="Sign out">↗</button></div>
+        <div class="profile-mini"><div class="avatar" id="profileInitial">A</div><div class="profile-copy"><b id="profileName">Admin</b><small id="profileRole">Administrator</small></div><button id="logoutButton" class="logout-button" title="Sign out"><span data-icon="log-out"></span></button></div>
       </div>
     </aside>
     <main class="main">
-      <header class="topbar"><button class="mobile-menu" id="mobileMenu">☰</button><div class="breadcrumb"><span>EMP</span><i>/</i><b id="breadcrumbCurrent">Overview</b></div><div class="top-actions"><span id="todayLabel"></span><button class="icon-button" id="refreshButton" title="Refresh">↻</button><div class="top-avatar" id="topInitial">A</div></div></header>
+      <header class="topbar"><button class="mobile-menu" id="mobileMenu" aria-label="Open navigation"><span data-icon="menu"></span></button><div class="breadcrumb"><span>EMP</span><i>/</i><b id="breadcrumbCurrent">Overview</b></div><div class="top-actions"><span id="todayLabel"></span><button class="icon-button" id="refreshButton" title="Refresh"><span data-icon="refresh-cw"></span></button><div class="top-avatar" id="topInitial">A</div></div></header>
       <section class="page active" id="page-overview">
-        <div class="page-heading"><div><div class="eyebrow">HUMAN CAPITAL SERVICES</div><h1>Overview</h1><p>Your HCS operations at a glance.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Live spreadsheet data</span><span id="lastUpdated">—</span></div></div>
+        <div class="page-heading"><div><div class="eyebrow">HUMAN CAPITAL SERVICES</div><h1>Overview</h1><p>Your HCS operations at a glance.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Main spreadsheet · Read only</span><span id="lastUpdated">—</span></div></div>
         <div class="metric-grid">
-          <article class="metric-card"><div class="metric-top"><span>New Hire Records</span><span class="metric-icon green">♙</span></div><strong id="metricNewHire">—</strong><small>Records in New Hire master</small></article>
-          <article class="metric-card"><div class="metric-top"><span>Contract Due</span><span class="metric-icon amber">◷</span></div><strong id="metricContract">—</strong><small>Expiring within 90 days</small></article>
-          <article class="metric-card"><div class="metric-top"><span>Aging RFP</span><span class="metric-icon blue">⌁</span></div><strong id="metricRfp">—</strong><small>30+ days · selected request types</small></article>
-          <article class="metric-card"><div class="metric-top"><span>New Hires This Year</span><span class="metric-icon violet">↗</span></div><strong id="metricYear">—</strong><small id="yearCaption">Join records this year</small></article>
+          <article class="metric-card"><div class="metric-top"><span>RFP Records</span><span class="metric-icon green" data-icon="clipboard-list"></span></div><strong id="metricNewHire">—</strong><small id="metricRfpCaption">Completed records</small></article>
+          <article class="metric-card"><div class="metric-top"><span>New Hire Records</span><span class="metric-icon amber" data-icon="user-plus"></span></div><strong id="metricContract">—</strong><small id="metricHireCaption">Completed records</small></article>
+          <article class="metric-card"><div class="metric-top"><span>Contract Extension</span><span class="metric-icon blue" data-icon="calendar-clock"></span></div><strong id="metricRfp">—</strong><small id="metricExtensionCaption">Completed records</small></article>
+          <article class="metric-card"><div class="metric-top"><span>Employee Exit</span><span class="metric-icon violet" data-icon="git-compare-arrows"></span></div><strong id="metricYear">—</strong><small id="yearCaption">Resignation · Termination · Retirement</small></article>
         </div>
         <div class="dashboard-grid">
-          <section class="panel"><div class="panel-heading"><div><h2>Contract Expiration</h2><p>Employees with contract end dates in the next 90 days</p></div><span class="count-pill amber" id="contractCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>BUSINESS UNIT</th><th>CONTRACT END</th><th>REMAINING</th></tr></thead><tbody id="contractRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>New Hire & Extension masters</span><span>H-90 monitoring</span></div></section>
-          <section class="panel"><div class="panel-heading"><div><h2>RFP Aging</h2><p>Selected recruitment requests aged 30+ days</p></div><span class="count-pill blue" id="rfpCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>POSITION / BU</th><th>REQUEST TYPE</th><th>AGE</th></tr></thead><tbody id="rfpRows"><tr><td colspan="3" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>PKWT Addition · Replacement · TPC to PKWT</span><span>30+ days</span></div></section>
+          <section class="panel"><div class="panel-heading"><div><h2>Upcoming Contract End Dates</h2><p>Records from Extend 2026 with end dates in the next 90 days</p></div><span class="count-pill amber" id="contractCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>EMPLOYEE</th><th>BUSINESS UNIT</th><th>CONTRACT END</th><th>REMAINING</th></tr></thead><tbody id="contractRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>Source: Extend 2026</span><span>Next 90 days</span></div></section>
+          <section class="panel"><div class="panel-heading"><div><h2>Latest RFP Records</h2><p>Latest requests received in the current year</p></div><span class="count-pill blue" id="rfpCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>RFP / POSITION</th><th>BUSINESS UNIT</th><th>CONTRACT</th><th>PROCESS</th></tr></thead><tbody id="rfpRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>Source: 2026 Rec Pipeline</span><span id="rfpYearCaption">Current year</span></div></section>
           <section class="panel"><div class="panel-heading"><div><h2>Activity Log</h2><p>Latest actions performed in EMP</p></div><button class="text-button" id="viewHistory">View 10-day history ↗</button></div><div id="latestActivity" class="activity-list"><div class="empty-state">No activity recorded.</div></div></section>
           <section class="panel" id="historyPanel"><div class="panel-heading"><div><h2>Activity History</h2><p>Audit trail from the last 10 days</p></div><span class="count-pill neutral">10 DAYS</span></div><div id="historyList" class="activity-list"><div class="empty-state">No history recorded.</div></div></section>
         </div>
@@ -76,22 +75,22 @@
 
       <section class="page" id="page-data">
         <div class="page-heading"><div><div class="eyebrow" id="dataGroup">DATA SOURCE</div><h1 id="dataTitle">Data</h1><p id="dataSubtitle">Read-only view of the connected Google Sheets source.</p></div><div class="heading-meta"><span class="live-pill"><b></b> Read-only source</span><span id="dataUpdated">—</span></div></div>
-        <div class="data-toolbar"><div class="search-box">⌕ <input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="secondary-button" id="dataRefresh">↻ Refresh data</button></div></div>
+        <div class="data-toolbar"><div class="search-box"><span data-icon="search"></span><input id="dataSearch" placeholder="Search records in this sheet…"></div><div class="data-toolbar-actions"><span id="dataRecordCount">—</span><button class="secondary-button" id="dataRefresh"><span data-icon="refresh-cw"></span> Refresh data</button></div></div>
         <div class="data-source-meta" id="dataSourceMeta"></div>
         <section class="panel"><div class="table-scroll data-table-scroll"><table id="sourceTable"><thead id="sourceTableHead"></thead><tbody id="sourceTableBody"><tr><td class="empty-cell">Select a data source.</td></tr></tbody></table></div></section>
         <div class="data-pagination"><span id="dataPageInfo">—</span><div><button class="secondary-button" id="dataPrev">Previous</button><button class="secondary-button" id="dataNext">Next</button></div></div>
         <div class="warning-box" id="dataError" hidden></div>
       </section>
       <section class="page" id="page-users">
-        <div class="page-heading"><div><div class="eyebrow">ACCESS & PERMISSIONS</div><h1>User Management</h1><p>Manage accounts allowed to access EMP.</p></div><button class="primary-button" id="addUserButton">＋ Add User</button></div>
+        <div class="page-heading"><div><div class="eyebrow">ACCESS & PERMISSIONS</div><h1>User Management</h1><p>Manage accounts allowed to access EMP.</p></div><button class="primary-button" id="addUserButton"><span data-icon="plus"></span> Add User</button></div>
         <div class="user-summary"><div class="summary-tile"><span>Total Users</span><b id="usersTotal">—</b></div><div class="summary-tile"><span>Active</span><b id="usersActive">—</b></div><div class="summary-tile"><span>Admins</span><b id="usersAdmins">—</b></div></div>
-        <section class="panel"><div class="panel-heading users-heading"><div><h2>Workspace Users</h2><p>Accounts and access permissions.</p></div><div class="search-box">⌕ <input id="userSearch" placeholder="Search username or name…"></div></div><div class="table-scroll"><table><thead><tr><th>USER</th><th>ROLE</th><th>STATUS</th><th>LAST UPDATED</th><th></th></tr></thead><tbody id="userRows"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
+        <section class="panel"><div class="panel-heading users-heading"><div><h2>Workspace Users</h2><p>Accounts and access permissions.</p></div><div class="search-box"><span data-icon="search"></span><input id="userSearch" placeholder="Search username or name…"></div></div><div class="table-scroll"><table><thead><tr><th>USER</th><th>ROLE</th><th>STATUS</th><th>LAST UPDATED</th><th></th></tr></thead><tbody id="userRows"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
         <div class="info-note"><b>ⓘ</b><div><strong>Admin-first release</strong><p>Only active Admin accounts can access this first release. Additional roles can be enabled in a later phase.</p></div></div>
       </section>
     </main>
   </div>
 
-  <div class="modal-backdrop" id="userModal" hidden><div class="modal"><div class="modal-header"><div><div class="eyebrow">WORKSPACE ACCESS</div><h2 id="modalTitle">Add User</h2></div><button class="close-button" id="closeModal">×</button></div><form id="userForm"><label>Username<input id="userUsername" required minlength="3" maxlength="40" autocomplete="off"></label><label>Full Name<input id="userFullName" required maxlength="100"></label><label id="passwordLabel">Password<input id="userPassword" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters"></label><div class="form-row"><label>Role<select id="userRole"><option value="Admin">Admin</option></select></label><label>Status<select id="userStatus"><option>Active</option><option>Inactive</option></select></label></div><div class="modal-note">Passwords are hashed on the server. Leave password blank when editing to keep the current password.</div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelModal">Cancel</button><button class="primary-button" id="saveUserButton">Save User</button></div><div id="formError" class="form-error" hidden></div></form></div></div>
+  <div class="modal-backdrop" id="userModal" hidden><div class="modal"><div class="modal-header"><div><div class="eyebrow">WORKSPACE ACCESS</div><h2 id="modalTitle">Add User</h2></div><button class="close-button" id="closeModal" aria-label="Close"><span data-icon="x"></span></button></div><form id="userForm"><label>Username<input id="userUsername" required minlength="3" maxlength="40" autocomplete="off"></label><label>Full Name<input id="userFullName" required maxlength="100"></label><label id="passwordLabel">Password<input id="userPassword" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters"></label><div class="form-row"><label>Role<select id="userRole"><option value="Admin">Admin</option></select></label><label>Status<select id="userStatus"><option>Active</option><option>Inactive</option></select></label></div><div class="modal-note">Passwords are hashed on the server. Leave password blank when editing to keep the current password.</div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelModal">Cancel</button><button class="primary-button" id="saveUserButton">Save User</button></div><div id="formError" class="form-error" hidden></div></form></div></div>
   <div class="toast" id="toast"></div>
   <script src="/app.js" defer></script>
 </body>
