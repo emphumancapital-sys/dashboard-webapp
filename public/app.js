@@ -5,7 +5,8 @@ const state = {
   sort: { column: null, dir: "desc" }, headers: [], columnIndexes: [], columnMeta: {},
   searchTimer: null, recordSchema: null, schemaCache: new Map(), recordToken: 0, editingRowNumber: null, currentRows: new Map(),
   organization: [], organizationLoaded: false, organizationCategory: "Department", editingOrgRow: null,
-  tableSort: { org: { key: null, dir: "desc" }, users: { key: null, dir: "desc" } }
+  tableSort: { org: { key: null, dir: "desc" }, users: { key: null, dir: "desc" }, pipe: { key: null, dir: "desc" } },
+  pipe: { stages: [], cards: [], statusValues: [], view: "board", loaded: false, token: 0, drag: null, move: null, detailRow: null, tab: "", statusHeader: "RFP Process" }
 };
 const PAGE_SIZES = [25, 50, 100, 200];
 
@@ -13,7 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderStaticIcons(); initTheme(); initSidebar();
   try { const saved = Number(localStorage.getItem("emp-page-size")); if (PAGE_SIZES.includes(saved)) state.dataPageSize = saved; } catch {}
   $("dataPageSize").value = String(state.dataPageSize);
-  ["orgCategory", "userRole", "userStatus", "dataPageSize"].forEach(id => enhanceSelect($(id), id === "dataPageSize" ? { compact: true } : {}));
+  ["orgCategory", "userRole", "userStatus", "dataPageSize", "pipeBU"].forEach(id => enhanceSelect($(id), id === "dataPageSize" ? { compact: true } : {}));
   $("todayLabel").textContent = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(new Date());
   bindEvents();
   try {
@@ -39,7 +40,7 @@ function bindEvents() {
     const dateClear = e.target.closest(".date-clear"); if (dateClear) { setDateField(dateClear.closest(".date-field"), ""); dateClear.closest(".date-field").querySelector(".date-trigger").focus(); return; }
     const fieldLabel = e.target.closest("span.field-label"); if (fieldLabel) { fieldLabel.parentElement.querySelector(".select-trigger,.date-trigger")?.focus(); return; }
     const tr = e.target.closest("tbody tr");
-    if (!tr || e.target.closest("button,a") || tr.querySelector(".empty-cell,.skeleton")) return;
+    if (!tr || e.target.closest("button,a") || tr.querySelector(".empty-cell,.skeleton") || tr.hasAttribute("data-pipe-row")) return;
     tr.parentElement.querySelectorAll("tr.selected").forEach(x => x !== tr && x.classList.remove("selected"));
     tr.classList.toggle("selected");
   });
@@ -50,7 +51,10 @@ function bindEvents() {
   bindModal("orgModal", closeOrgModal, ["closeOrgModal", "cancelOrgModal"]);
   bindModal("recordModal", closeRecordModal, ["closeRecordModal", "cancelRecordModal"]);
   bindModal("userModal", closeUserModal, ["closeModal", "cancelModal"]);
+  bindModal("pipeModal", closePipeDetail, ["closePipeModal", "cancelPipeModal"]);
+  bindModal("moveModal", closeMoveDialog, ["closeMoveModal", "cancelMoveModal"]);
   bindModal("confirmModal", () => settleConfirm(false), ["confirmCancel"]);
+  bindPipeline();
   $("confirmOk").addEventListener("click", () => settleConfirm(true));
 
   $("addUserButton").addEventListener("click", () => openUserModal());
@@ -156,12 +160,12 @@ function navigate(page, sourceId = null) {
     if (src) { state.dataPage = 1; state.sort = { column: null, dir: "desc" }; state.loadedSourceId = null; $("dataSearch").value = ""; $("dataSearchClear").hidden = true; loadSourceData(); }
   }
   else if (page === "organization") { $("breadcrumbCurrent").textContent = "Organization"; loadOrganization(); }
-  else if (page === "hiring") $("breadcrumbCurrent").textContent = "Hiring Pipeline";
+  else if (page === "hiring") { $("breadcrumbCurrent").textContent = "Hiring Pipeline"; loadPipeline(); }
   else $("breadcrumbCurrent").textContent = "Overview";
   $("sidebar").classList.remove("open");
   if (page === "users") loadUsers();
 }
-function refreshCurrent() { if ($("page-users").classList.contains("active")) loadUsers(); else if ($("page-data").classList.contains("active")) loadSourceData(true); else if ($("page-organization").classList.contains("active")) loadOrganization(); else if ($("page-overview").classList.contains("active")) loadDashboard(true); }
+function refreshCurrent() { if ($("page-users").classList.contains("active")) loadUsers(); else if ($("page-data").classList.contains("active")) loadSourceData(true); else if ($("page-organization").classList.contains("active")) loadOrganization(); else if ($("page-hiring").classList.contains("active")) loadPipeline(true); else if ($("page-overview").classList.contains("active")) loadDashboard(true); }
 function setRefreshing(on) { $("refreshButton").classList.toggle("is-busy", on); $("refreshButton").disabled = on; }
 
 /* ---------- Overview ---------- */
@@ -492,6 +496,202 @@ async function saveUser(e) {
   finally { setBusy(btn, false, label); }
 }
 
+/* ---------- Hiring Pipeline (kanban over the recruitment pipeline tab) ---------- */
+const PIPE_START = { key: null, label: "Sourcing", mode: "start" };
+const PIPE_API = "/.netlify/functions/pipeline";
+function pipeColumns() { return [PIPE_START, ...state.pipe.stages]; }
+function pipeStageIndex(key) { return state.pipe.stages.findIndex(s => s.key === key); } // -1 = Sourcing
+function pipeStage(key) { return state.pipe.stages.find(s => s.key === key) || PIPE_START; }
+function pipeCard(rowNumber) { return state.pipe.cards.find(c => c.rowNumber === rowNumber); }
+function pipeDate(part) { return part?.iso ? formatDate(part.iso) : (part?.value || ""); }
+function pipeDecorate(card) { card.joinIso = card.stages?.join?.iso || ""; return card; }
+function pipeFiltered(group) {
+  const q = $("pipeSearch").value.toLowerCase().trim(), bu = $("pipeBU").value;
+  return state.pipe.cards.filter(c => c.group === group && (!bu || c.businessUnit === bu) && (!q || [c.code, c.position, c.candidates, c.businessUnit, c.department, c.initiator].join(" ").toLowerCase().includes(q)));
+}
+function bindPipeline() {
+  const board = $("pipeBoard");
+  $("pipeView").addEventListener("click", e => { const b = e.target.closest("[data-view]"); if (!b) return; state.pipe.view = b.dataset.view; renderPipeline(); });
+  $("pipeSearch").addEventListener("input", () => { $("pipeSearchClear").hidden = !$("pipeSearch").value; renderPipeline(); });
+  $("pipeSearchClear").addEventListener("click", () => { $("pipeSearch").value = ""; $("pipeSearchClear").hidden = true; renderPipeline(); $("pipeSearch").focus(); });
+  $("pipeBU").addEventListener("change", renderPipeline);
+  bindLocalSort("pipeHead", "pipe", renderPipeline);
+  board.addEventListener("click", e => {
+    const cardEl = e.target.closest(".k-card"); if (!cardEl) return; const rowNumber = Number(cardEl.dataset.row);
+    const next = e.target.closest("[data-pipe-next]"), menu = e.target.closest("[data-pipe-menu]");
+    if (next) requestMove(rowNumber, next.dataset.pipeNext);
+    else if (e.target.closest("[data-pipe-complete]")) setPipeStatus(rowNumber, "complete");
+    else if (menu) openStageMenu(menu, rowNumber);
+    else openPipeDetail(rowNumber);
+  });
+  board.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.classList.contains("k-card")) openPipeDetail(Number(e.target.dataset.row)); });
+  // Drag and drop between columns
+  const clearDrag = () => { state.pipe.drag = null; board.classList.remove("is-dragging"); board.querySelectorAll(".is-over,.can-drop,.no-drop,.is-dragging").forEach(el => el.classList.remove("is-over", "can-drop", "no-drop", "is-dragging")); };
+  board.addEventListener("dragstart", e => {
+    const cardEl = e.target.closest?.(".k-card"); if (!cardEl) return; const card = pipeCard(Number(cardEl.dataset.row)); if (!card) return;
+    Pop.close(); state.pipe.drag = card.rowNumber; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(card.rowNumber));
+    requestAnimationFrame(() => { cardEl.classList.add("is-dragging"); board.classList.add("is-dragging"); board.querySelectorAll(".k-col").forEach(col => col.classList.add(moveCheck(card, col.dataset.stage || null).ok ? "can-drop" : "no-drop")); });
+  });
+  board.addEventListener("dragover", e => { const col = e.target.closest?.(".k-col"); if (!col || state.pipe.drag === null || !col.classList.contains("can-drop")) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (!col.classList.contains("is-over")) { board.querySelectorAll(".is-over").forEach(el => el.classList.remove("is-over")); col.classList.add("is-over"); } });
+  board.addEventListener("dragleave", e => { const col = e.target.closest?.(".k-col"); if (col && !col.contains(e.relatedTarget)) col.classList.remove("is-over"); });
+  board.addEventListener("drop", e => { const col = e.target.closest?.(".k-col"), rowNumber = state.pipe.drag; if (!col || rowNumber === null) return; e.preventDefault(); const stage = col.dataset.stage || null; clearDrag(); requestMove(rowNumber, stage); });
+  board.addEventListener("dragend", clearDrag);
+  $("pipeRows").addEventListener("click", e => {
+    const tr = e.target.closest("[data-pipe-row]"); if (!tr) return; const rowNumber = Number(tr.dataset.pipeRow);
+    if (e.target.closest("[data-pipe-reopen]")) setPipeStatus(rowNumber, "reopen"); else openPipeDetail(rowNumber);
+  });
+  $("moveForm").addEventListener("submit", submitMove);
+  $("pipeForm").addEventListener("submit", savePipeDetail);
+  $("pipeForm").addEventListener("change", () => { $("savePipeButton").disabled = !Object.keys(pipeDetailChanges()).length; });
+  $("pipeStatusButton").addEventListener("click", () => { const card = pipeCard(state.pipe.detailRow); if (card) setPipeStatus(card.rowNumber, card.group === "completed" ? "reopen" : "complete"); });
+}
+async function loadPipeline(forceRefresh = false, quiet = false) {
+  const p = state.pipe, token = ++p.token;
+  if (!p.loaded && !quiet) $("pipeBoard").innerHTML = Array.from({ length: 6 }, (_, i) => `<section class="k-col"><header class="k-head"><span class="skeleton" style="width:${[60, 84, 84, 76, 88, 62][i]}px"></span></header><div class="k-list">${Array.from({ length: [3, 2, 1, 2, 1, 1][i] }, () => `<div class="k-card is-skeleton"><span class="skeleton" style="width:40%"></span><span class="skeleton" style="width:78%;height:12px"></span><span class="skeleton" style="width:58%"></span></div>`).join("")}</div></section>`).join("");
+  if (!quiet) setRefreshing(true);
+  try {
+    const d = await api(`${PIPE_API}${forceRefresh ? "?refresh=1" : ""}`);
+    if (token !== p.token) return;
+    p.stages = d.stages || []; p.cards = (d.cards || []).map(pipeDecorate); p.statusValues = d.statusValues || []; p.tab = d.tab || ""; p.statusHeader = d.statusHeader || "RFP Process"; p.loaded = true;
+    $("pipeError").hidden = true; $("pipeSubtitle").textContent = `Ongoing requests from ${p.tab}, stage by stage.`;
+    $("pipeUpdated").textContent = `Updated ${new Date(d.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    const units = [...new Set(p.cards.map(c => c.businessUnit).filter(Boolean))].sort((a, b) => a.localeCompare(b)), select = $("pipeBU"), keep = select.value;
+    select.innerHTML = `<option value="">All business units</option>${units.map(u => `<option value="${escAttr(u)}">${esc(u)}</option>`).join("")}`; select.value = units.includes(keep) ? keep : ""; syncSelect(select);
+    renderPipeline();
+    if (!$("pipeModal").hidden && !$("pipeModal").dataset.dirty && pipeCard(p.detailRow)) openPipeDetail(p.detailRow, true);
+  } catch (error) {
+    if (token !== p.token) return;
+    if (!p.loaded) $("pipeBoard").innerHTML = `<div class="k-notice">${emptyBlock("alert-triangle", "Could not load the pipeline", "Check the message below, then refresh.")}</div>`;
+    $("pipeError").hidden = false; $("pipeError").textContent = error.message;
+  } finally { if (token === p.token && !quiet) setRefreshing(false); }
+}
+function renderPipeline() {
+  const p = state.pipe, board = $("pipeBoard"), isBoard = p.view === "board";
+  $("pipeOngoingCount").textContent = p.cards.filter(c => c.group === "ongoing").length; $("pipeCompletedCount").textContent = p.cards.filter(c => c.group === "completed").length;
+  $("pipeView").querySelectorAll("[data-view]").forEach(b => { const on = b.dataset.view === p.view; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); });
+  board.hidden = !isBoard; $("pipeCompleted").hidden = isBoard;
+  const list = pipeFiltered(isBoard ? "ongoing" : "completed"), filtering = !!($("pipeSearch").value.trim() || $("pipeBU").value);
+  $("pipeCount").textContent = `${list.length.toLocaleString()} ${filtering ? (list.length === 1 ? "match" : "matches") : (list.length === 1 ? "request" : "requests")}`;
+  if (!isBoard) { renderPipeCompleted(list, filtering); return; }
+  if (!p.cards.some(c => c.group === "ongoing")) {
+    const found = p.statusValues.filter(v => v.value).map(v => `${v.value} (${v.count})`).join(", ");
+    board.innerHTML = `<div class="k-notice">${emptyBlock("inbox", "No ongoing requests", found ? `No row in ${p.tab} has an ongoing ${p.statusHeader}. Values found: ${found}.` : `${p.tab} has no rows with a ${p.statusHeader} value yet.`)}</div>`; return;
+  }
+  const scroll = { left: board.scrollLeft, tops: Object.fromEntries([...board.querySelectorAll(".k-col")].map(col => [col.dataset.stage, col.querySelector(".k-list")?.scrollTop || 0])) };
+  board.innerHTML = pipeColumns().map(stage => {
+    const cards = list.filter(c => (c.stage || null) === stage.key).sort((a, b) => (b.daysOpen ?? -1) - (a.daysOpen ?? -1) || b.rowNumber - a.rowNumber);
+    return `<section class="k-col is-${stage.mode}" data-stage="${stage.key ?? ""}" aria-label="${escAttr(stage.label)}"><header class="k-head"><b>${esc(stage.label)}</b><span class="k-count">${cards.length}</span>${stage.mode === "auto" ? `<span class="k-auto" title="Filled automatically from ${escAttr(stage.source)}. Cards arrive here by themselves.">${svgIcon("lock", 11)}Auto</span>` : ""}</header><div class="k-list">${cards.map(pipeCardHtml).join("") || `<div class="k-empty">${stage.mode === "auto" ? `Fills from ${esc(stage.source)}` : filtering ? "No matches" : "Drop a card here"}</div>`}</div></section>`;
+  }).join("");
+  board.scrollLeft = scroll.left; board.querySelectorAll(".k-col").forEach(col => { const top = scroll.tops[col.dataset.stage]; if (top) col.querySelector(".k-list").scrollTop = top; });
+}
+function pipeCardHtml(card) {
+  const next = state.pipe.stages[pipeStageIndex(card.stage) + 1], age = card.daysOpen;
+  const since = card.stage ? pipeDate(card.stages[card.stage]) : (card.receivedIso ? formatDate(card.receivedIso) : card.received);
+  const action = !next ? `<button type="button" class="k-next is-complete" data-pipe-complete title="Mark this request as completed">${svgIcon("check", 13)}Complete</button>`
+    : next.mode === "auto" ? `<span class="k-wait" title="${escAttr(next.label)} fills in automatically from ${escAttr(next.source)}">${svgIcon("clock", 12)}Waiting for ${esc(next.label)}</span>`
+    : `<button type="button" class="k-next" data-pipe-next="${next.key}" title="Move to ${escAttr(next.label)}">${esc(next.label)}${svgIcon("arrow-right", 13)}</button>`;
+  return `<article class="k-card${card.pending ? " is-pending" : ""}" draggable="true" tabindex="0" data-row="${card.rowNumber}" aria-label="${escAttr(card.position || card.code)}">
+    <div class="k-top"><span class="k-code">${esc(card.code || `Row ${card.rowNumber}`)}</span>${age === null ? "" : `<span class="k-age${age > 60 ? " late" : age > 30 ? " warn" : ""}" title="${age} day${age === 1 ? "" : "s"} since the RFP was received">${age}d</span>`}</div>
+    <b class="k-title">${esc(card.position || "Untitled position")}</b>
+    <div class="k-meta">${esc([card.businessUnit, card.department].filter(Boolean).join(" · ") || "—")}</div>
+    ${card.candidates ? `<div class="k-cand">${svgIcon("user", 12)}<span>${esc(card.candidates)}</span></div>` : ""}
+    <div class="k-since">${svgIcon("calendar", 12)}${esc(card.stage ? `${pipeStage(card.stage).label}: ${since || "—"}` : `Received ${since || "—"}`)}</div>
+    <div class="k-foot">${action}<button type="button" class="row-action" data-pipe-menu title="Move to another stage" aria-label="Move ${escAttr(card.code)} to another stage" aria-haspopup="menu">${svgIcon("more", 15)}</button></div>
+  </article>`;
+}
+function renderPipeCompleted(list, filtering) {
+  const rows = applyLocalSort(list, "pipe"); paintLocalSort("pipeHead", "pipe");
+  $("pipeRows").innerHTML = rows.length ? rows.map(c => `<tr data-pipe-row="${c.rowNumber}" class="is-clickable"><td><b>${esc(c.code)}</b></td><td>${esc(c.position)}</td><td>${esc(c.businessUnit)}</td><td>${esc(c.candidates || "—")}</td><td>${esc(pipeDate(c.stages.join) || "—")}</td><td>${esc(c.completionDays || "—")}</td><td class="col-actions"><div class="row-actions"><button type="button" class="row-action" data-pipe-reopen title="Reopen (move back to the board)" aria-label="Reopen ${escAttr(c.code)}">${svgIcon("undo", 14)}</button></div></td></tr>`).join("") : `<tr><td colspan="7" class="empty-cell">${filtering ? emptyBlock("search", "No matching requests", "Nothing in the completed list matches this filter.") : emptyBlock("inbox", "Nothing completed yet", "Requests appear here once they are marked completed.")}</td></tr>`;
+}
+// Can this card go to that stage? Returns the manual stage dates a backward move would clear.
+function moveCheck(card, targetKey) {
+  const stages = state.pipe.stages, t = pipeStageIndex(targetKey), current = pipeStageIndex(card.stage), target = pipeStage(targetKey);
+  if (t === current) return { ok: false, same: true };
+  if (target.mode === "auto") return { ok: false, tone: "info", reason: `${target.label} fills in automatically from ${target.source}, so cards arrive there by themselves.` };
+  const blocking = stages.filter((s, i) => i > t && s.mode === "auto" && card.stages[s.key]?.reached);
+  if (blocking.length) return { ok: false, tone: "warning", reason: `${card.code} already has ${blocking.map(s => s.label).join(" and ")} data in the sheet, so it can't move back before that stage.` };
+  return { ok: true, target, cleared: stages.filter((s, i) => i > t && s.mode === "manual" && card.stages[s.key]?.reached) };
+}
+function openStageMenu(button, rowNumber) {
+  if (Pop.current?.anchor === button) { Pop.close(); return; }
+  const card = pipeCard(rowNumber); if (!card) return;
+  const panel = document.createElement("div"); panel.className = "select-pop stage-menu"; panel.setAttribute("role", "menu"); panel.tabIndex = -1;
+  panel.innerHTML = `<div class="pop-title">Move ${esc(card.code)} to</div>` + pipeColumns().map(stage => { const check = moveCheck(card, stage.key), current = (card.stage || null) === stage.key; return `<button type="button" role="menuitem" class="pop-option${current ? " is-selected" : ""}" data-stage="${stage.key ?? ""}" ${check.ok ? "" : "disabled"} title="${escAttr(check.reason || (current ? "Current stage" : ""))}"><span>${esc(stage.label)}</span>${current ? svgIcon("check", 14) : stage.mode === "auto" ? `<em>${svgIcon("lock", 11)}Auto</em>` : ""}</button>`; }).join("");
+  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b || b.disabled) return; Pop.close(); requestMove(rowNumber, b.dataset.stage || null); });
+  panel.addEventListener("keydown", e => { if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return; e.preventDefault(); const items = [...panel.querySelectorAll(".pop-option:not(:disabled)")], i = items.indexOf(document.activeElement); items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus(); });
+  Pop.open(button, panel); (panel.querySelector(".pop-option:not(:disabled)") || panel).focus({ preventScroll: true });
+}
+function requestMove(rowNumber, targetKey) {
+  const card = pipeCard(rowNumber); if (!card || card.pending) return;
+  const check = moveCheck(card, targetKey || null);
+  if (!check.ok) { if (check.reason) toast(check.reason, check.tone); return; }
+  const target = check.target, back = !target.key;
+  state.pipe.move = { rowNumber, targetKey: target.key, cleared: check.cleared };
+  $("moveTitle").textContent = back ? "Move back to Sourcing" : `Move to ${target.label}`; $("moveSub").textContent = [card.code, card.position].filter(Boolean).join(" · ");
+  $("moveNote").hidden = !check.cleared.length; $("moveNote").innerHTML = check.cleared.length ? svgIcon("alert-triangle", 15) + `<span>Moving back clears ${check.cleared.length === 1 ? "this date" : "these dates"} in the sheet: ${check.cleared.map(s => `<b>${esc(s.label)}</b> (${esc(pipeDate(card.stages[s.key]))})`).join(", ")}.</span>` : "";
+  $("moveField").hidden = back; $("moveError").hidden = true;
+  if (!back) { $("moveLabel").textContent = `${target.label} date`; $("moveDateSlot").innerHTML = dateFieldHtml("moveDate", card.stages[target.key]?.iso || isoOf(new Date()), "moveDateTrigger"); syncDateField($("moveDateSlot").firstElementChild); }
+  $("moveOk").textContent = back ? "Move back" : "Move"; $("moveOk").className = check.cleared.length ? "danger-button" : "primary-button";
+  openModal("moveModal", $("moveOk"));
+}
+function closeMoveDialog() { closeModal("moveModal"); state.pipe.move = null; }
+function applyStageValues(card, values) {
+  Object.entries(values).forEach(([key, iso]) => { card.stages[key] = { ...card.stages[key], reached: !!iso, iso, value: iso ? formatDate(iso) : "" }; });
+  card.stage = state.pipe.stages.filter(s => card.stages[s.key]?.reached).pop()?.key || null; pipeDecorate(card);
+}
+async function submitMove(e) {
+  e.preventDefault(); const move = state.pipe.move, card = move && pipeCard(move.rowNumber); if (!card) return;
+  const values = Object.fromEntries(move.cleared.map(s => [s.key, ""]));
+  if (move.targetKey) { const date = $("moveDateSlot").querySelector("input").value; if (!date) { $("moveError").textContent = "Pick a date for this stage."; $("moveError").hidden = false; return; } if (date !== (card.stages[move.targetKey]?.iso || "")) values[move.targetKey] = date; }
+  if (!Object.keys(values).length) { closeMoveDialog(); return; }
+  const label = pipeStage(move.targetKey).label, snapshot = JSON.stringify({ stages: card.stages, stage: card.stage });
+  closeMoveDialog();
+  // Optimistic: the card moves immediately and snaps back if the sheet rejects the change.
+  applyStageValues(card, values); card.pending = true; renderPipeline();
+  try { await api(PIPE_API, { method: "PATCH", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, values }) }); card.pending = false; renderPipeline(); toast(`${card.code} moved to ${label}.`, "success"); loadPipeline(true, true); }
+  catch (error) { Object.assign(card, JSON.parse(snapshot)); card.pending = false; pipeDecorate(card); renderPipeline(); toast(`${card.code} was not moved. ${error.message}`, "error"); }
+}
+async function setPipeStatus(rowNumber, action) {
+  const card = pipeCard(rowNumber); if (!card || card.pending) return; const complete = action === "complete", header = state.pipe.statusHeader;
+  const ok = await confirmDialog(complete
+    ? { title: `Mark ${card.code} as completed?`, message: `${card.position || "This request"} leaves the board and moves to the Completed list. ${header} is updated in the sheet.`, confirmLabel: "Mark completed", icon: "check-circle" }
+    : { title: `Reopen ${card.code}?`, message: `${card.position || "This request"} goes back to the board at its last stage. ${header} is set back to ongoing in the sheet.`, confirmLabel: "Reopen", icon: "undo" });
+  if (!ok) return;
+  const before = { group: card.group, status: card.status };
+  card.group = complete ? "completed" : "ongoing"; card.pending = true; if (state.pipe.detailRow === rowNumber) closePipeDetail(); renderPipeline();
+  try { const result = await api(PIPE_API, { method: "POST", body: JSON.stringify({ rowNumber, code: card.code, action }) }); card.status = result.value || card.status; card.pending = false; renderPipeline(); toast(complete ? `${card.code} marked as completed.` : `${card.code} reopened.`, "success"); loadPipeline(true, true); }
+  catch (error) { Object.assign(card, before); card.pending = false; renderPipeline(); toast(error.message, "error", { duration: 8000 }); }
+}
+function openPipeDetail(rowNumber, keepScroll = false) {
+  const card = pipeCard(rowNumber); if (!card) return; const done = card.group === "completed", stages = state.pipe.stages, body = $("pipeModal").querySelector(".modal-body"), top = body.scrollTop;
+  state.pipe.detailRow = rowNumber;
+  $("pipeModalTitle").textContent = card.position || card.code; $("pipeModalSub").textContent = [card.code, card.status, `Row ${card.rowNumber}`].filter(Boolean).join(" · ");
+  const info = [["Business unit", card.businessUnit], ["Department", card.department], ["Division", card.division], ["Contract", card.contract], ["Location", card.location], ["Required person", card.requiredPerson], ["Candidates", card.candidates], ["RFP received", card.receivedIso ? formatDate(card.receivedIso) : card.received], ["Hiring date request", card.hiringDateIso ? formatDate(card.hiringDateIso) : card.hiringDate], ["Initiator", card.initiator], ["Reason", card.reason], ...(done ? [["Completion days", card.completionDays]] : []), ["Remarks", card.remarks, true]].filter(x => x[1]);
+  $("pipeInfo").innerHTML = info.map(([label, value, wide]) => `<div${wide ? ' class="is-wide"' : ""}><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("");
+  $("pipeStages").innerHTML = stages.map(stage => {
+    const part = card.stages[stage.key] || {}, state_ = part.reached ? (card.stage === stage.key ? "is-current" : "is-done") : "is-pending";
+    let control;
+    if (stage.mode === "auto") { const parts = (part.parts || []).filter(x => x.value); control = `<div class="stage-text">${parts.length ? parts.map(x => `<span><em>${esc(x.name)}</em>${esc(x.iso ? formatDate(x.iso) : x.value)}</span>`).join("") : `<span class="is-placeholder">Not yet</span>`}</div>`; }
+    else if (done || (part.value && !part.iso)) control = `<div class="stage-text"><span${part.value ? "" : ' class="is-placeholder"'}>${esc(pipeDate(part) || "—")}</span></div>`;
+    else control = dateFieldHtml(stage.key, part.iso || "", `pd-${stage.key}`);
+    return `<div class="stage-row ${state_}"><span class="stage-dot">${part.reached ? svgIcon("check", 11) : ""}</span><div class="stage-name"><b>${esc(stage.label)}</b>${stage.mode === "auto" ? `<small>${svgIcon("lock", 10)}From ${esc(stage.source)}</small>` : ""}</div>${control}</div>`;
+  }).join("");
+  $("pipeStages").querySelectorAll(".date-field").forEach(field => { syncDateField(field); field.querySelector("input").dataset.initial = field.querySelector("input").value; });
+  $("pipeFormError").hidden = true; $("savePipeButton").hidden = done; $("savePipeButton").disabled = true; $("savePipeButton").textContent = "Save Changes";
+  $("pipeStatusButton").innerHTML = done ? svgIcon("undo", 14) + "Reopen" : svgIcon("check-circle", 14) + "Mark as completed";
+  if (keepScroll) { $("pipeModal").dataset.dirty = ""; body.scrollTop = top; } else openModal("pipeModal", $("cancelPipeModal"));
+}
+function closePipeDetail() { closeModal("pipeModal"); state.pipe.detailRow = null; }
+function pipeDetailChanges() { const values = {}; $("pipeStages").querySelectorAll("input[type=hidden]").forEach(input => { if (input.value !== input.dataset.initial) values[input.name] = input.value; }); return values; }
+async function savePipeDetail(e) {
+  e.preventDefault(); const card = pipeCard(state.pipe.detailRow), btn = $("savePipeButton"), err = $("pipeFormError"); if (!card) return;
+  const values = pipeDetailChanges(); if (!Object.keys(values).length) { closePipeDetail(); return; }
+  err.hidden = true; setBusy(btn, true, "Saving…");
+  try { await api(PIPE_API, { method: "PATCH", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, values }) }); applyStageValues(card, values); closePipeDetail(); renderPipeline(); toast(`${card.code} updated${card.stage ? ` · now at ${pipeStage(card.stage).label}` : ""}.`, "success"); loadPipeline(true, true); }
+  catch (error) { err.textContent = error.message; err.hidden = false; }
+  finally { setBusy(btn, false, "Save Changes"); }
+}
+
 /* ---------- Local (client-side) table sort: Organization + Users ---------- */
 function bindLocalSort(headId, name, render) {
   $(headId).addEventListener("click", e => {
@@ -535,7 +735,7 @@ function openModal(id, focusTarget = null) {
   requestAnimationFrame(() => { if (focusTarget && !focusTarget.disabled) focusTarget.focus({ preventScroll: true }); else focusFirstField(backdrop); });
 }
 function closeModal(id) { Pop.close(); const backdrop = $(id); if (backdrop.hidden) return; backdrop.hidden = true; backdrop.dataset.dirty = ""; if (!topModal() && lastFocus?.isConnected) lastFocus.focus({ preventScroll: true }); }
-function topModal() { const open = Object.keys(MODALS).map($).filter(el => !el.hidden); return open[open.length - 1] || null; }
+function topModal() { const open = [...document.querySelectorAll(".modal-backdrop")].filter(el => !el.hidden); return open[open.length - 1] || null; }
 let confirmResolve = null;
 function confirmDialog({ title, message, confirmLabel = "Confirm", tone = "primary", icon = "alert-circle" }) {
   settleConfirm(false);
@@ -734,6 +934,10 @@ const ICONS = {
   "ban": `<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>`,
   "pencil": `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>`,
   "trash": `<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>`,
+  "more": `<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>`,
+  "undo": `<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>`,
+  "clock": `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`,
+  "user": `<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>`,
   "lock": `<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`,
   "inbox": `<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>`,
   "external-link": `<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>`,

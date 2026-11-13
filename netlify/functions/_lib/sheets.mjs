@@ -206,7 +206,7 @@ const MONTHS={jan:0,january:0,januari:0,feb:1,february:1,februari:1,mar:2,march:
 function fullYear(y){y=Number(y);return y<100?(y<70?2000+y:1900+y):y;}
 function utc(y,m,d){const t=Date.UTC(y,m,d);const x=new Date(t);return x.getUTCFullYear()===y&&x.getUTCMonth()===m&&x.getUTCDate()===d?t:null;}
 // Returns {t, a, b} where a/b are the first two numeric parts of an ambiguous d/m/y value.
-function parseDateParts(value){
+export function parseDateParts(value){
   const s=String(value??"").trim();if(!s||s.length>40)return null;
   let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/);
   if(m){const t=utc(+m[1],+m[2]-1,+m[3]);return t===null?null:{t};}
@@ -218,7 +218,7 @@ function parseDateParts(value){
   if(m)return {a:+m[1],b:+m[2],y:fullYear(m[3])};
   return null;
 }
-function resolveDate(parts,order){
+export function resolveDate(parts,order){
   if(!parts)return null;if(parts.t!==undefined)return parts.t;
   return order==="dmy"?utc(parts.y,parts.b-1,parts.a):utc(parts.y,parts.a-1,parts.b);
 }
@@ -235,7 +235,7 @@ function parseNumberLoose(value){
   const n=Number(s);return Number.isFinite(n)?(negative?-n:n):null;
 }
 // Decide per column whether it holds dates, numbers or text (80% of non-empty values must agree).
-function inferColumnMeta(records,width){
+export function inferColumnMeta(records,width){
   const meta=[];
   for(let i=0;i<width;i++){
     let filled=0,dates=0,numbers=0,dayFirst=0,monthFirst=0;
@@ -252,6 +252,8 @@ function inferColumnMeta(records,width){
   }
   return meta;
 }
+// ISO (yyyy-mm-dd) form of a sheet date cell, or "" when the cell is not a date.
+export function toIsoDate(value,order="dmy"){const t=resolveDate(parseDateParts(value),order);return t===null?"":new Date(t).toISOString().slice(0,10);}
 const textCollator=new Intl.Collator(undefined,{numeric:true,sensitivity:"base"});
 function sortRecords(records,position,dir,meta){
   const sign=dir==="asc"?1:-1;

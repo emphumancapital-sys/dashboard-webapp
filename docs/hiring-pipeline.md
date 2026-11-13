@@ -1,0 +1,48 @@
+# Hiring Pipeline (kanban)
+
+Built on the v4 UI build. Adds `netlify/functions/pipeline.mjs`, a new Hiring Pipeline page in `public/`, and four `export` keywords in `_lib/sheets.mjs`. No existing endpoint or payload changed.
+
+## Source
+- Tab: `2026 Rec Pipeline` (A:AI, header row 1). Columns are found by header name, with the documented column letter as fallback.
+- A request is on the board when `RFP Process` (column Q) reads as ongoing (`On Going`, `Ongoing`, `In Progress`, `Open`, ...) and in the Completed list when it reads as completed (`Completed`, `Done`, `Closed`, ...). Rows with any other value (for example cancelled) are not shown.
+
+## Stages
+| Board column | Sheet column | Written by the app |
+|---|---|---|
+| Sourcing | none of the stage columns filled | n/a |
+| 1st Interview | U `1st Intv` | date |
+| 2nd Interview | V `2nd Intv` | date |
+| Offering In | W `Offering In` | date |
+| Offering Done | X `Offering Done` | date |
+| Psikotest | Y `Psychological Test`, Z `Psikotest Vendor`, AA `Psikotest Results` | never (formula, from SPK 2026) |
+| MCU | AB `MCU`, AC `MCU Results` | never (formula, from MCU 2026) |
+| Join Date | AD `Join Date` | date |
+
+A request's stage is the right-most stage column that holds a value. The sheet is the only source of truth; the app stores nothing of its own.
+
+## Moving a card
+- Three ways: the next-stage button on the card, drag and drop, or the `...` menu. Each opens a small dialog with a date picker (default today) and writes that date to the stage column as an ISO date with `USER_ENTERED`, the same way the record form writes dates. The cell keeps its own display format.
+- Stages can be skipped. Skipped columns stay empty.
+- Moving back clears the dates of the later manual stages, after a warning that lists them. The target's existing date is left untouched unless you change it.
+- Cards cannot be dropped on Psikotest or MCU, and cannot move back before them once the sheet has Psikotest or MCU data.
+- Clicking a card opens its details, where every manual stage date can be set, changed or cleared.
+
+## Completing
+- `Complete` (on Join Date cards) or `Mark as completed` (in the details) sets `RFP Process` for that row. `Reopen` in the Completed list sets it back.
+- The value written is taken from the column's dropdown options, or else from the spelling most used in existing rows. If neither has a matching value the app refuses and writes nothing.
+- If `RFP Process` is a formula in that row the app refuses and says so.
+
+## Safeguards
+- Every write first re-reads the target row and checks that its RFP Code still matches the card. If the sheet was sorted or rows were deleted in the meantime, the write is refused with a prompt to refresh.
+- Every target cell is checked for a formula before writing.
+- Each change is recorded in `EMP Activity Log` under module `Hiring Pipeline`.
+
+## API
+- `GET pipeline[?refresh=1]` returns stages, cards (ongoing and completed) and the status values found.
+- `PATCH pipeline` `{ rowNumber, code, values: { first: "2026-11-13", offerIn: "" } }` sets or clears manual stage dates.
+- `POST pipeline` `{ rowNumber, code, action: "complete" | "reopen" }`.
+
+## Validation
+- `node --check` passes for `pipeline.mjs`, `_lib/sheets.mjs`, `public/app.js`.
+- Exercised in Chrome against an in-memory spreadsheet stub that runs the real `pipeline.mjs`: forward move, skip, drag and drop, backward move, blocked moves, detail edit, complete, reopen, formula-managed status, changed-row refusal, search, filter, dark theme, 390px viewport.
+- Not exercised against the live Google Sheet. The header names, the status wording and which columns are formulas come from `docs/crud-schema.json` and were not checked against the live sheet.

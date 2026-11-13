@@ -101,8 +101,20 @@
         <div class="warning-box" id="dataError" hidden></div>
       </section>
       <section class="page" id="page-hiring">
-        <div class="page-heading"><div><h1>Hiring Pipeline</h1><p>Track ongoing hiring requests from personnel request through completion and hiring.</p></div></div>
-        <section class="panel"><div class="empty-state">Hiring Pipeline is planned for the next development phase. Its workflow stages will be defined together before implementation.</div></section>
+        <div class="page-heading">
+          <div><h1>Hiring Pipeline</h1><p id="pipeSubtitle">Ongoing personnel requests, stage by stage.</p></div>
+          <div class="heading-actions"><span class="updated-label" id="pipeUpdated">—</span></div>
+        </div>
+        <div class="data-toolbar">
+          <div class="segmented" id="pipeView" role="tablist"><button type="button" role="tab" class="active" data-view="board" aria-selected="true">Ongoing <i id="pipeOngoingCount">0</i></button><button type="button" role="tab" data-view="completed" aria-selected="false">Completed <i id="pipeCompletedCount">0</i></button></div>
+          <div class="search-box"><span data-icon="search"></span><input id="pipeSearch" placeholder="Search position, RFP code, candidate…" autocomplete="off" aria-label="Search requests"><button type="button" class="search-clear" id="pipeSearchClear" aria-label="Clear search" title="Clear search" hidden><span data-icon="x"></span></button></div>
+          <div class="toolbar-select"><select id="pipeBU" aria-label="Filter by business unit" data-placeholder="All business units"><option value="">All business units</option></select></div>
+          <span class="toolbar-spacer"></span>
+          <span class="record-count" id="pipeCount">—</span>
+        </div>
+        <div class="kanban" id="pipeBoard"></div>
+        <section class="panel" id="pipeCompleted" hidden><div class="table-scroll"><table><thead id="pipeHead"><tr><th><button type="button" class="th-sort" data-key="code">RFP Code<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="position">Position<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="businessUnit">Business Unit<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="candidates">Candidate<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="joinIso">Join Date<span class="sort-ico"></span></button></th><th><button type="button" class="th-sort" data-key="completionDays">Completion Days<span class="sort-ico"></span></button></th><th class="col-actions" aria-label="Actions"></th></tr></thead><tbody id="pipeRows"></tbody></table></div></section>
+        <div class="warning-box" id="pipeError" hidden></div>
       </section>
       <section class="page" id="page-organization">
         <div class="page-heading"><div><span class="group-chip">Master Data</span><h1>Organization</h1><p>Manage organization references used across EMP modules.</p></div><button class="primary-button" id="addOrgButton"><span data-icon="plus"></span> Add Item</button></div>
@@ -152,6 +164,24 @@
       </div></div>
       <div id="formError" class="form-error" hidden></div>
       <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelModal">Cancel</button><button class="primary-button" id="saveUserButton">Save User</button></div></div>
+    </form>
+  </div></div>
+
+  <div class="modal-backdrop" id="pipeModal" hidden><div class="modal record-modal" role="dialog" aria-modal="true" aria-labelledby="pipeModalTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" data-icon="workflow"></span><div><h2 id="pipeModalTitle">Request</h2><p id="pipeModalSub"></p></div></div><button type="button" class="close-button" id="closePipeModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <form id="pipeForm" novalidate>
+      <div class="modal-body"><dl class="info-grid" id="pipeInfo"></dl><div class="section-label">Stages</div><div class="stage-list" id="pipeStages"></div></div>
+      <div id="pipeFormError" class="form-error" hidden></div>
+      <div class="modal-footer"><div class="modal-hint"><button type="button" class="secondary-button" id="pipeStatusButton"></button></div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelPipeModal">Close</button><button class="primary-button" id="savePipeButton">Save Changes</button></div></div>
+    </form>
+  </div></div>
+
+  <div class="modal-backdrop" id="moveModal" hidden><div class="modal move-modal" role="dialog" aria-modal="true" aria-labelledby="moveTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" data-icon="arrow-right"></span><div><h2 id="moveTitle">Move</h2><p id="moveSub"></p></div></div><button type="button" class="close-button" id="closeMoveModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <form id="moveForm" novalidate>
+      <div class="modal-body"><div class="modal-note" id="moveNote" hidden></div><div class="field" id="moveField"><span class="field-label" id="moveLabel">Date</span><div id="moveDateSlot"></div><small class="field-help">Written to the sheet as this stage's date.</small></div></div>
+      <div id="moveError" class="form-error" hidden></div>
+      <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelMoveModal">Cancel</button><button class="primary-button" id="moveOk">Move</button></div></div>
     </form>
   </div></div>
 
