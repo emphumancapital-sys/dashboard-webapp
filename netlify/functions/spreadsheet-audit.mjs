@@ -99,7 +99,7 @@ export const handler = async event => {
       spreadsheetId: SPREADSHEET_ID,
       ranges,
       includeGridData: true,
-      fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(userEnteredValue(userEnteredFormula),dataValidation))))"
+      fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowMetadata(hiddenByUser),columnMetadata(hiddenByUser),rowData(values(userEnteredValue(userEnteredFormula),dataValidation))))"
     }) : { data: { sheets: [] } };
 
     const tabAudits = [];
@@ -110,6 +110,8 @@ export const handler = async event => {
       const title = tab.properties?.title || "Unknown";
       const meta = sheetMeta.find(item => item.title === title);
       const validationMap = new Map();
+      const hiddenRows = new Set();
+      const hiddenColumns = new Set();
       const formulaSamples = [];
       let formulaCount = 0;
       let validationCellCount = 0;
@@ -117,6 +119,8 @@ export const handler = async event => {
       for (const block of (tab.data || [])) {
         const baseRow = block.startRow || 0;
         const baseCol = block.startColumn || 0;
+        (block.rowMetadata || []).forEach((meta, offset) => { if (meta.hiddenByUser) hiddenRows.add(baseRow + offset + 1); });
+        (block.columnMetadata || []).forEach((meta, offset) => { if (meta.hiddenByUser) hiddenColumns.add(colToA1(baseCol + offset)); });
         (block.rowData || []).forEach((row, rowOffset) => {
           (row.values || []).forEach((cell, colOffset) => {
             const rowNumber = baseRow + rowOffset + 1;
@@ -162,6 +166,8 @@ export const handler = async event => {
         hidden: Boolean(meta?.hidden),
         grid: meta?.grid || null,
         scannedGrid: { rows: rowLimit, columns: colLimit },
+        hiddenRows: [...hiddenRows].sort((a,b) => a-b),
+        hiddenColumns: [...hiddenColumns],
         validationCellCount,
         validations: [...validationMap.values()],
         formulaCount,
