@@ -305,6 +305,47 @@ export async function getSheetRowFormulas(spreadsheetId,title,rowNumber,startCol
   const r=await client.spreadsheets.values.get({spreadsheetId,range,valueRenderOption:"FORMULA"});
   return r.data.values?.[0]||[];
 }
+export async function ensureSheetRowExists(spreadsheetId, sheetId, targetRow, startColumn, endColumn) {
+  const client = await api();
+  const book = await client.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
+  });
+  const sheet = (book.data.sheets || []).find(item => item.properties?.sheetId === sheetId);
+  if (!sheet) throw new Error("Target sheet was not found.");
+  const grid = sheet.properties.gridProperties || {};
+  const currentRows = Number(grid.rowCount || 0);
+  const requiredColumns = columnIndex(endColumn) + 1;
+  const requests = [];
+  if (targetRow > currentRows) {
+    requests.push({ appendDimension: { sheetId, dimension: "ROWS", length: targetRow - currentRows } });
+  }
+  if (requiredColumns > Number(grid.columnCount || 0)) {
+    requests.push({ appendDimension: { sheetId, dimension: "COLUMNS", length: requiredColumns - Number(grid.columnCount || 0) } });
+  }
+  if (requests.length) {
+    await client.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
+  }
+  // Extend the previous row's formatting and data validation to the newly-created row.
+  // Values are deliberately not copied; formula cells are handled separately.
+  if (targetRow > currentRows && targetRow > 1) {
+    const startColIndex = columnIndex(startColumn);
+    const endColIndex = columnIndex(endColumn) + 1;
+    await client.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [
+      { copyPaste: {
+        source: { sheetId, startRowIndex: targetRow - 2, endRowIndex: targetRow - 1, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
+        destination: { sheetId, startRowIndex: targetRow - 1, endRowIndex: targetRow, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
+        pasteType: "PASTE_FORMAT", pasteOrientation: "NORMAL"
+      }},
+      { copyPaste: {
+        source: { sheetId, startRowIndex: targetRow - 2, endRowIndex: targetRow - 1, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
+        destination: { sheetId, startRowIndex: targetRow - 1, endRowIndex: targetRow, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
+        pasteType: "PASTE_DATA_VALIDATION", pasteOrientation: "NORMAL"
+      }}
+    ]}});
+  }
+}
+
 export async function writeSheetValues(spreadsheetId, data) {
   const client=await api();
   await client.spreadsheets.values.batchUpdate({spreadsheetId,requestBody:{valueInputOption:"USER_ENTERED",data}});

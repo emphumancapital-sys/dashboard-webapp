@@ -1,6 +1,6 @@
 import { json } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
-import { readTabFromSpreadsheet, readManyTabsFromSpreadsheet, getSheetTitles, getSheetCrudMetadata, getSheetRowFormulas, writeSheetValues, clearSheetValues, addActivity, copyFormulaColumnsFromPrevious } from "./_lib/sheets.mjs";
+import { readTabFromSpreadsheet, readManyTabsFromSpreadsheet, getSheetTitles, getSheetCrudMetadata, getSheetRowFormulas, writeSheetValues, clearSheetValues, addActivity, copyFormulaColumnsFromPrevious, ensureSheetRowExists } from "./_lib/sheets.mjs";
 
 const MAIN_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2zaUJf_CW2VYk";
 
@@ -122,6 +122,7 @@ export const handler = async event => {
     const meta=await getSheetCrudMetadata(MAIN_ID,source.tab,source.headerRow,source.dataStartRow,source.startColumn,source.endColumn);
     if(event.httpMethod==="POST"){
       const rowNumber=await findNextRow(source);
+      await ensureSheetRowExists(MAIN_ID,meta.sheetId,rowNumber,source.startColumn,source.endColumn);
       const formulas=await getSheetRowFormulas(MAIN_ID,source.tab,rowNumber,source.startColumn,source.endColumn);
       validateWritable(source,body.values,meta.columns,formulas);
       if(source.accessMode==="crud_candidate"){
