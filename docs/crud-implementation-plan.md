@@ -15,13 +15,13 @@ Only worksheets whose `sheetState` is `visible` in the supplied workbook are in 
 | New Hire 2026 | CRUD candidate | Handover tracking; formula-derived columns. |
 | New Hire vs Exit | CRUD candidate | Simple A:C employee movement table. |
 | Data Valid Employees | View only | Employee master/reference data; do not assume it is safe to mutate. |
-| MCU Induction 2026 | Blocked | Header contains an IMPORTRANGE/#REF! error. |
-| Dashboard 2026 | View only | Formula-driven dashboard. |
-| Pivot Dashboard 2026 | View only | Pivot/report output. |
+| MCU Induction 2026 | Partial CRUD | Only column A (RFP Received) is editable; columns B:H are imported from another workbook and read-only. |
+
+| Pivot Dashboard 2026 (excluded by user decision) | View only | Pivot/report output. |
 | EMP User Management | System managed | Existing user-management workflow only. |
 | EMP Activity Log | System managed | Append-only audit trail. |
 
-`Offer`, `2026 TPC Pipeline`, `Pivot Dashboard 2026`, `RFP Deletion`, and `Resource Deletion` are excluded because they are not confirmed as visible in the supplied audit. `EMP User Management` and `EMP Activity Log` are app-managed system tabs, not ordinary data-navigation sources. All hidden tabs remain excluded regardless of whether they contain operational data.
+`Offer` and `2026 TPC Pipeline` are not included because they are not confirmed as visible in the supplied workbook. All hidden tabs remain excluded regardless of whether they contain operational data.
 
 ## Safety rules for implementation
 
@@ -50,6 +50,13 @@ Only worksheets whose `sheetState` is `visible` in the supplied workbook are in 
 This package adds the audited schema foundation only. It does not yet enable write operations. CRUD endpoints should be added only after the schema and per-row formula protections are implemented and tested against a live Editor-authorized spreadsheet. This avoids accidental changes to formulas or linked recruitment records.
 
 
-## Repository 1.2 audit correction
+## User-confirmed scope update
 
-The data-source registry has been aligned to the 10 visible business tabs confirmed by the latest audit. The app-managed user and activity sheets remain in their dedicated modules. The data page continues to be read-only in this patch; CRUD write endpoints and forms have not yet been implemented. Technical source metadata chips above the table are hidden while the record count and refresh action remain visible.
+- `Dashboard 2026 (excluded by user decision)` is explicitly excluded from the app navigation and data sources.
+- `MCU Induction 2026` is included as a partially editable source. Only column A (`RFP Received`) may be created/updated. Columns B:H are populated by `IMPORTRANGE` from another workbook and must never be written, cleared, or deleted by this application. Before enabling write operations, the backend must validate that the target range is exactly column A and reject any payload containing fields outside the allowlist.
+
+
+## Latest user-confirmed scope
+
+- Exclude `Dashboard 2026` completely from application navigation and data source registry.
+- Include `MCU Induction 2026` as a partial-edit source: only column A (`RFP Received`) is writable. Columns B:H are imported from an external workbook through `IMPORTRANGE` and must remain read-only. Backend write handlers must reject any write range or payload that includes columns B:H.

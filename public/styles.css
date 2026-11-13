@@ -164,5 +164,5 @@ tbody tr:has(.empty-cell){--rowbg:transparent!important}.empty-cell{text-align:c
 .page-heading p{display:none}.metric-card>strong{font-size:22px}.data-toolbar{flex-wrap:wrap}.data-toolbar .search-box{flex:1;width:auto}.users-heading{flex-direction:column;align-items:stretch}.users-heading .search-box{width:100%}.user-summary{gap:6px}.summary-tile{flex-direction:column;gap:2px;padding:8px 10px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
-/* Keep operational tables clean: record count and actions remain visible; technical source metadata stays hidden. */
+/* Keep technical source metadata hidden in the data toolbar. */
 .data-source-meta{display:none!important}

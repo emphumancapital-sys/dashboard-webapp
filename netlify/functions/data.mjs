@@ -7,13 +7,11 @@ const MAIN_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2
 // Source map rebuilt from the uploaded Recruitment Pipeline.xlsx workbook.
 // Header/data row positions and ranges are intentionally explicit per tab.
 const SOURCES = [
-  // Business tabs confirmed visible in the 2026-11-13 spreadsheet audit.
-  { id:"dashboard", label:"Dashboard", group:"Overview & Reports", tab:"Dashboard 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"M", identityColumns:[], accessMode:"view_only" },
   { id:"rfp-master", label:"Request for Personnel", group:"Recruitment & Staffing", tab:"RFP 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"S", identityColumns:[0,5], accessMode:"crud_candidate" },
   { id:"rfp-pipeline", label:"Recruitment Pipeline", group:"Recruitment & Staffing", tab:"2026 Rec Pipeline", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"AI", identityColumns:[0,5], accessMode:"crud_candidate" },
-  { id:"mcu", label:"Medical Check Up (MCU)", group:"Recruitment & Staffing", tab:"MCU 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[3], accessMode:"crud_candidate" },
-  { id:"mcu-induction", label:"MCU Induction", group:"Recruitment & Staffing", tab:"MCU Induction 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"H", identityColumns:[2], accessMode:"view_only", schemaStatus:"needs_attention", schemaMessage:"This tab is populated through IMPORTRANGE and its imported header is not a safe CRUD schema. It is excluded from write operations." },
   { id:"spk", label:"Psychotest (SPK)", group:"Recruitment & Staffing", tab:"SPK 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[2,4], accessMode:"crud_candidate" },
+  { id:"mcu", label:"Medical Check Up (MCU)", group:"Recruitment & Staffing", tab:"MCU 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[3], accessMode:"crud_candidate" },
+  { id:"mcu-induction", label:"MCU Induction", group:"Recruitment & Staffing", tab:"MCU Induction 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"H", identityColumns:[0], accessMode:"partial_crud", writableColumns:["A"], importedColumns:["B","C","D","E","F","G","H"], note:"Only RFP Received (column A) is editable. Columns B:H are populated through IMPORTRANGE and must remain read-only." },
   { id:"extension", label:"Contract Extension", group:"Recruitment & Staffing", tab:"Extend 2026", headerRow:2, dataStartRow:3, startColumn:"A", endColumn:"U", identityColumns:[9,4], accessMode:"crud_candidate" },
   { id:"new-hire", label:"New Hire", group:"Employee Records", tab:"New Hire 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[4,1], accessMode:"crud_candidate" },
   { id:"employee-db", label:"Employee Database", group:"Employee Records", tab:"Data Valid Employees", headerRow:3, dataStartRow:4, startColumn:"A", endColumn:"N", identityColumns:[0,1], accessMode:"view_only" },
@@ -25,6 +23,9 @@ const publicSource = source => ({
   headerRow:source.headerRow, dataStartRow:source.dataStartRow,
   status:source.schemaStatus || "ready",
   accessMode:source.accessMode || "view_only",
+  writableColumns:source.writableColumns || [],
+  importedColumns:source.importedColumns || [],
+  note:source.note || null,
   schemaMessage:source.schemaMessage || null,
   available:true
 });

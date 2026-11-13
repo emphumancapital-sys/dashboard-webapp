@@ -1,7 +1,7 @@
 {
   "generatedFrom": "Recruitment Pipeline.xlsx + emp-hcs-spreadsheet-audit (1).json",
   "generatedAt": "2026-11-13",
-  "scope": "visible tabs only",
+  "scope": "visible tabs only; Dashboard 2026 explicitly excluded by user",
   "tabs": [
     {
       "id": "rfp-master",
@@ -319,58 +319,27 @@
       "endColumn": "H",
       "headers": [
         "RFP Received",
-        "=IFERROR(__xludf.DUMMYFUNCTION(\"IMPORTRANGE(\"\"https://docs.google.com/spreadsheets/d/103EYE0WytBo9usk176-pg_YyvY_1GaQD1YaR0gINywc/edit?resourcekey=&gid=822034166#gid=822034166\"\",\"\"MEDICAL INDUCTION 2026!B:H\"\")\"),\"#REF!\")",
-        "",
-        "",
-        "",
-        "",
-        "",
-        ""
+        "Imported data (IMPORTRANGE)"
       ],
-      "status": "blocked",
+      "status": "partial_crud",
       "observedFormulaColumns": [
         "B"
       ],
-      "formulaProtection": "runtime_cell_formula_check_required",
-      "note": "Header row contains #REF!/IMPORTRANGE error; no reliable field schema."
-    },
-    {
-      "id": "dashboard",
-      "tab": "Dashboard 2026",
-      "group": "Reports & Logs",
-      "headerRow": 1,
-      "dataStartRow": 2,
-      "startColumn": "A",
-      "endColumn": "M",
-      "headers": [
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        ""
+      "formulaProtection": "block_all_writes_except_column_A",
+      "note": "Only RFP Received in column A is editable. Imported columns B:H are read-only.",
+      "headerNote": "Only the first column is manually maintained. Columns B:H are imported from the external Medical Induction workbook; do not edit them in EMP.",
+      "writableColumns": [
+        "A"
       ],
-      "status": "view_only",
-      "observedFormulaColumns": [
+      "readOnlyColumns": [
         "B",
         "C",
         "D",
+        "E",
         "F",
         "G",
-        "H",
-        "J",
-        "K",
-        "L"
-      ],
-      "formulaProtection": "runtime_cell_formula_check_required",
-      "note": "Formula-driven dashboard."
+        "H"
+      ]
     },
     {
       "id": "users",
@@ -416,5 +385,5 @@
       "note": "Append-only audit log; no edit/delete."
     }
   ],
-  "auditNote": "Visible business tabs were cross-checked against emp-hcs-spreadsheet-audit (1).json generated 2026-11-13. EMP User Management and EMP Activity Log are app-managed system tabs and are handled by their dedicated pages/functions, not the spreadsheet data navigation."
+  "auditNote": "Dashboard 2026 is intentionally excluded from application navigation by user decision. MCU Induction 2026 is partially editable: column A (RFP Received) only; columns B:H are imported from another workbook and read-only."
 }
