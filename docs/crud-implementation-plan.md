@@ -60,3 +60,18 @@ This package adds the audited schema foundation only. It does not yet enable wri
 
 - Exclude `Dashboard 2026` completely from application navigation and data source registry.
 - Include `MCU Induction 2026` as a partial-edit source: only column A (`RFP Received`) is writable. Columns B:H are imported from an external workbook through `IMPORTRANGE` and must remain read-only. Backend write handlers must reject any write range or payload that includes columns B:H.
+
+
+## CRUD implementation added in repository 1.2
+
+- `GET ?source=<id>&action=schema` reads live Google Sheets headers, data validation, dropdown options (including range-based validation lists where readable), and formula information.
+- `POST` creates a record in the first available row. Formula-managed columns are copied down from the most recent formula row for the configured formula columns, then only submitted input cells are written.
+- `PATCH` updates submitted cells only. The backend checks the actual target row for formulas and rejects formula-managed columns.
+- `DELETE` clears editable cell values for the selected row rather than deleting the entire sheet row. Formula cells remain intact; the operation is recorded in EMP Activity Log.
+- `MCU Induction 2026` is partial CRUD: only column A is writable; columns B:H are excluded by the server allowlist. Delete is disabled.
+- The data table now retains physical Google Sheets row numbers so edits/deletes target the correct row after search and pagination.
+- URL fields are validated as HTTP/HTTPS; strict dropdown options and date validations are checked server-side. Strings beginning with `=` are stored as text to avoid accidental formula injection.
+
+## Deployment / verification notes
+
+The source files pass Node syntax checks. Live write testing still requires the Netlify service account to have Editor access to the main spreadsheet. No live spreadsheet mutation was performed during this build. Test on a duplicate spreadsheet first, especially formula copy-down behavior and range-based dropdowns, before enabling production writes.

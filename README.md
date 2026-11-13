@@ -79,3 +79,8 @@ See `docs/data-schema.md` and `docs/data-integration.md` for exact workbook tabs
 - Session cookie is HttpOnly, Secure, SameSite=Lax, and signed using `JWT_SECRET`.
 - Only Active Admin users can access the current release.
 - This release does not include login throttling, password reset, MFA, or a full security audit. Restrict site access appropriately because employee data is confidential.
+
+
+## Spreadsheet CRUD
+
+The Data page supports Admin-only create, update, and safe clear operations for configured sources. Validation and formula metadata are loaded from Google Sheets. The MCU Induction source is restricted to column A (`RFP Received`); imported columns B:H are read-only. Ensure the service account has Editor permission before testing writes. Use a duplicate workbook for initial write verification.

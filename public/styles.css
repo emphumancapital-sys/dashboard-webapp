@@ -166,3 +166,15 @@ tbody tr:has(.empty-cell){--rowbg:transparent!important}.empty-cell{text-align:c
 
 /* Keep technical source metadata hidden in the data toolbar. */
 .data-source-meta{display:none!important}
+
+.record-modal{width:min(760px,100%);max-height:min(86dvh,900px);overflow:auto}
+.record-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-height:58dvh;overflow:auto;padding:2px 2px 10px}
+.record-fields label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:12px}
+.record-fields input,.record-fields select,.record-fields textarea{width:100%;min-width:0;border:1px solid var(--line-2);border-radius:8px;padding:9px 10px;background:var(--solid);color:var(--ink);font:inherit}
+.record-fields .field-full{grid-column:1/-1}
+.record-fields input[type=checkbox]{width:18px;height:18px}
+#sourceTable td.record-actions{position:sticky;right:0;background:var(--solid);white-space:nowrap;z-index:2}
+.record-actions button{margin-right:4px}
+@media(max-width:720px){.record-fields{grid-template-columns:1fr}.record-fields .field-full{grid-column:auto}.record-modal{max-height:92dvh}}
+
+[hidden]{display:none!important}

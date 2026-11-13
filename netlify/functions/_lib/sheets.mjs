@@ -228,22 +228,129 @@ export async function readTabFromSpreadsheet(spreadsheetId,title,headerRow=1,dat
   }
   const values=raw.values||[];
   const offset=Math.max(0,dataStartRow-headerRow);
-  const candidateRows=values.slice(offset).filter(row=>rangeOptions.identityColumns?.length ? rangeOptions.identityColumns.some(index=>row[index]!==undefined&&row[index]!==null&&row[index]!=="") : row.some(value=>value!==""&&value!==null&&value!==undefined));
-  const width=Math.max(raw.headers.length,...candidateRows.map(row=>row.length),0);
+  const candidateRecords=values.slice(offset).map((row,index)=>({row,rowNumber:dataStartRow+index})).filter(record=>{
+    const row=record.row;
+    return rangeOptions.identityColumns?.length ? rangeOptions.identityColumns.some(index=>row[index]!==undefined&&row[index]!==null&&row[index]!=="") : row.some(value=>value!==""&&value!==null&&value!==undefined);
+  });
+  const width=Math.max(raw.headers.length,...candidateRecords.map(record=>record.row.length),0);
   const keep=[];
   for(let i=0;i<width;i++){
     const header=String(raw.headers[i]??"").trim();
-    const hasData=candidateRows.some(row=>row[i]!==undefined&&row[i]!==null&&row[i]!=="");
+    const hasData=candidateRecords.some(record=>record.row[i]!==undefined&&record.row[i]!==null&&record.row[i]!=="");
     if(header||hasData)keep.push(i);
   }
   const headers=keep.map(i=>String(raw.headers[i]??"").trim()||`Column ${i+1}`);
-  let rows=candidateRows.map(row=>keep.map(i=>row[i]??""));
+  let records=candidateRecords.map(record=>({row:keep.map(i=>record.row[i]??""),rowNumber:record.rowNumber}));
   const q=String(search||"").trim().toLocaleLowerCase();
-  if(q)rows=rows.filter(row=>row.some(value=>String(value??"").toLocaleLowerCase().includes(q)));
-  const total=rows.length;
+  if(q)records=records.filter(record=>record.row.some(value=>String(value??"").toLocaleLowerCase().includes(q)));
+  const total=records.length;
+  const rows=records.map(record=>record.row);
+  const rowNumbers=records.map(record=>record.rowNumber);
   const safeSize=Math.min(200,Math.max(10,Number(pageSize)||50));
   const totalPages=Math.max(1,Math.ceil(total/safeSize));
   const safePage=Math.min(totalPages,Math.max(1,Number(page)||1));
   const start=(safePage-1)*safeSize;
-  return {headers,rows:rows.slice(start,start+safeSize),total,page:safePage,pageSize:safeSize,totalPages,headerRow,dataStartRow,cacheTtlSeconds:READ_CACHE_TTL_MS/1000};
+  return {headers,columnIndexes:keep,rows:rows.slice(start,start+safeSize),rowNumbers:rowNumbers.slice(start,start+safeSize),total,page:safePage,pageSize:safeSize,totalPages,headerRow,dataStartRow,cacheTtlSeconds:READ_CACHE_TTL_MS/1000};
+}
+
+
+// CRUD helpers. Metadata is fetched live so dropdown validation and formula cells
+// are never guessed from display labels.
+export async function getSheetCrudMetadata(spreadsheetId, title, headerRow, dataStartRow, startColumn, endColumn) {
+  const client = await api();
+  const meta = await client.spreadsheets.get({
+    spreadsheetId,
+    includeGridData: true,
+    ranges: [`'${String(title).replace(/'/g,"''")}'!${startColumn}${headerRow}:${endColumn}${Math.max(dataStartRow+2,headerRow+2)}`],
+    fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(userEnteredValue,dataValidation,effectiveFormat(numberFormat)))))"
+  });
+  const sheet = (meta.data.sheets||[]).find(x=>x.properties?.title===title);
+  const grid = sheet?.data?.[0];
+  const rows = grid?.rowData||[];
+  const header = rows[0]?.values||[];
+  const template = rows[Math.max(0,dataStartRow-headerRow)]?.values||[];
+  const columns = header.map((cell,index)=>{
+    const value=cell.userEnteredValue||{};
+    const formula=!!value.formulaValue;
+    const validation=cell.dataValidation||template[index]?.dataValidation||null;
+    const condition=validation?.condition||{};
+    const options=condition.type==="ONE_OF_RANGE"?[]:(condition.values||[]).map(x=>x.userEnteredValue).filter(x=>x!==undefined);
+    const numberFormat=cell.effectiveFormat?.numberFormat||template[index]?.effectiveFormat?.numberFormat||null;
+    return {index, header:value.stringValue||value.numberValue?.toString()||"", formula, validation:validation?{type:condition.type||"",options,strict:validation.strict!==false}:null, numberFormat};
+  });
+  for(const column of columns){
+    if(column.validation?.type==="ONE_OF_RANGE" && !column.validation.options.length){
+      const rawRange=(conditionRange(template,column.index)||"").replace(/^=/,"").trim();
+      if(rawRange){
+        try{
+          const values=await client.spreadsheets.values.get({spreadsheetId,range:rawRange,valueRenderOption:"FORMATTED_VALUE"});
+          column.validation.options=(values.data.values||[]).flat().map(v=>String(v??"").trim()).filter(Boolean);
+        }catch{
+          column.validation.options=[];
+          column.validation.sourceRangeUnavailable=true;
+        }
+      }
+    }
+  }
+  return {sheetId:sheet?.properties?.sheetId, columns};
+}
+function conditionRange(template,index){
+  const validation=template[index]?.dataValidation;
+  const value=validation?.condition?.values?.[0]?.userEnteredValue;
+  return typeof value==="string"?value:"";
+}
+export async function getSheetRowFormulas(spreadsheetId,title,rowNumber,startColumn,endColumn) {
+  const client=await api();
+  const range=`'${String(title).replace(/'/g,"''")}'!${startColumn}${rowNumber}:${endColumn}${rowNumber}`;
+  const r=await client.spreadsheets.values.get({spreadsheetId,range,valueRenderOption:"FORMULA"});
+  return r.data.values?.[0]||[];
+}
+export async function writeSheetValues(spreadsheetId, data) {
+  const client=await api();
+  await client.spreadsheets.values.batchUpdate({spreadsheetId,requestBody:{valueInputOption:"USER_ENTERED",data}});
+  // Invalidate cached ranges for this spreadsheet.
+  for(const key of readCache.keys()) if(key.startsWith(`${spreadsheetId}:`)) readCache.delete(key);
+}
+export async function clearSheetValues(spreadsheetId, ranges) {
+  const client=await api();
+  await client.spreadsheets.values.batchClear({spreadsheetId,requestBody:{ranges}});
+  for(const key of readCache.keys()) if(key.startsWith(`${spreadsheetId}:`)) readCache.delete(key);
+}
+
+export async function copyRowFormulas(spreadsheetId, sheetId, sourceRow, targetRow, startColumn, endColumn) {
+  const client=await api();
+  const startColIndex=columnIndex(startColumn), endColIndex=columnIndex(endColumn)+1;
+  await client.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests:[{copyPaste:{
+    source:{sheetId,startRowIndex:sourceRow-1,endRowIndex:sourceRow,startColumnIndex:startColIndex,endColumnIndex:endColIndex},
+    destination:{sheetId,startRowIndex:targetRow-1,endRowIndex:targetRow,startColumnIndex:startColIndex,endColumnIndex:endColIndex},
+    pasteType:"PASTE_FORMULA",pasteOrientation:"NORMAL"
+  }}]}});
+}
+function columnIndex(label){let n=0;for(const c of String(label).toUpperCase())n=n*26+c.charCodeAt(0)-64;return n-1;}
+
+export async function copyFormulaColumnsFromPrevious(spreadsheetId,sheetId,title,startRow,targetRow,columns) {
+  if(!columns?.length || targetRow<=startRow)return;
+  const client=await api();
+  const requests=[];
+  const quoted=`'${String(title).replace(/'/g,"''")}'`;
+  const ranges=columns.map(letter=>`${quoted}!${letter}${startRow}:${letter}${targetRow-1}`);
+  const response=await client.spreadsheets.values.batchGet({spreadsheetId,ranges,valueRenderOption:"FORMULA"});
+  const valueRanges=response.data.valueRanges||[];
+  columns.forEach((letter,index)=>{
+    const values=valueRanges[index]?.values||[];
+    let sourceRow=0;
+    for(let i=0;i<values.length;i++){
+      const value=values[i]?.[0];
+      if(typeof value==="string"&&value.startsWith("="))sourceRow=startRow+i;
+    }
+    if(sourceRow){
+      const col=columnIndex(letter);
+      requests.push({copyPaste:{
+        source:{sheetId,startRowIndex:sourceRow-1,endRowIndex:sourceRow,startColumnIndex:col,endColumnIndex:col+1},
+        destination:{sheetId,startRowIndex:targetRow-1,endRowIndex:targetRow,startColumnIndex:col,endColumnIndex:col+1},
+        pasteType:"PASTE_FORMULA",pasteOrientation:"NORMAL"
+      }});
+    }
+  });
+  if(requests.length)await client.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests}});
 }

@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const state = { user: null, users: [], editing: null, sources: [], activeSource: null, dataPage: 1, dataPageSize: 50, dataTotalPages: 1, searchTimer: null };
+const state = { user: null, users: [], editing: null, sources: [], activeSource: null, dataPage: 1, dataPageSize: 50, dataTotalPages: 1, searchTimer: null, recordSchema: null, editingRowNumber: null, currentRows: new Map() };
 
 document.addEventListener("DOMContentLoaded", async () => {
   renderStaticIcons();initTheme();initSidebar();
@@ -32,6 +32,11 @@ function bindEvents(){
   $("viewHistory").addEventListener("click",()=>$("historyPanel").scrollIntoView({behavior:"smooth",block:"center"}));
   $("dataSearch").addEventListener("input",()=>{clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{state.dataPage=1;loadSourceData();},350);});
   $("dataRefresh").addEventListener("click",()=>loadSourceData(true));
+  $("addRecordButton").addEventListener("click",()=>openRecordModal());
+  $("closeRecordModal").addEventListener("click",closeRecordModal);
+  $("cancelRecordModal").addEventListener("click",closeRecordModal);
+  $("recordModal").addEventListener("click",e=>{if(e.target===$("recordModal"))closeRecordModal();});
+  $("recordForm").addEventListener("submit",saveRecord);
   $("dataPrev").addEventListener("click",()=>{if(state.dataPage>1){state.dataPage--;loadSourceData();}});
   $("dataNext").addEventListener("click",()=>{if(state.dataPage<state.dataTotalPages){state.dataPage++;loadSourceData();}});
 }
@@ -124,7 +129,8 @@ async function loadSources(){
 }
 async function loadSourceData(forceRefresh=false){
   const source=state.activeSource;if(!source)return;
-  $("dataTitle").textContent=source.label;$("dataGroup").textContent=source.group;$("dataSubtitle").textContent=`Read-only view · ${source.tab}`;
+  $("dataTitle").textContent=source.label;$("dataGroup").textContent=source.group;$("dataSubtitle").textContent=source.accessMode==="view_only"?`Read-only view · ${source.tab}`:`Manage records · ${source.tab}`;
+  $("addRecordButton").hidden=source.accessMode==="view_only";
   $("sourceTableHead").innerHTML="";$("sourceTableBody").innerHTML='<tr><td class="empty-cell">Loading source data…</td></tr>';
   $("dataError").hidden=true;$("dataRefresh").disabled=true;
   if(source.status==="needs_attention"){
@@ -142,8 +148,13 @@ async function loadSourceData(forceRefresh=false){
     const data=await api(`/.netlify/functions/data?${q}`);
     if(data.needsAttention){source.status="needs_attention";source.schemaMessage=data.message;loadSourceData();return;}
     state.dataTotalPages=data.totalPages||1;state.dataPage=data.page||1;
-    $("sourceTableHead").innerHTML=`<tr>${data.headers.map((h,i)=>`<th title="${escAttr(h)}">${esc(h)}</th>`).join("")}</tr>`;
-    $("sourceTableBody").innerHTML=data.rows.length?data.rows.map(row=>`<tr>${row.map(value=>`<td title="${escAttr(formatCell(value))}">${esc(formatCell(value))}</td>`).join("")}</tr>`).join(""):`<tr><td class="empty-cell" colspan="${Math.max(data.headers.length,1)}">No records found${$("dataSearch").value?" for this search":" in this tab"}.</td></tr>`;
+    const canEdit=source.accessMode!=="view_only";
+    $("sourceTableHead").innerHTML=`<tr>${data.headers.map((h,i)=>`<th title="${escAttr(h)}">${esc(h)}</th>`).join("")}${canEdit?'<th>Actions</th>':""}</tr>`;
+    state.currentRows=new Map();
+    data.rows.forEach((row,i)=>{const full=[];(data.columnIndexes||row.map((_,index)=>index)).forEach((columnIndex,j)=>full[columnIndex]=row[j]);state.currentRows.set(Number(data.rowNumbers?.[i]),full);});
+    $("sourceTableBody").innerHTML=data.rows.length?data.rows.map((row,i)=>{const rowNumber=Number(data.rowNumbers?.[i]);return `<tr data-row-number="${rowNumber}">${row.map(value=>`<td title="${escAttr(formatCell(value))}">${esc(formatCell(value))}</td>`).join("")}${canEdit?`<td class="record-actions"><button class="small-action" data-record-edit="${rowNumber}">Edit</button>${source.accessMode==="crud_candidate"?`<button class="small-action" data-record-delete="${rowNumber}">Delete</button>`:""}</td>`:""}</tr>`;}).join(""):`<tr><td class="empty-cell" colspan="${Math.max(data.headers.length+(canEdit?1:0),1)}">No records found${$("dataSearch").value?" for this search":" in this tab"}.</td></tr>`;
+    $("sourceTableBody").querySelectorAll("[data-record-edit]").forEach(button=>button.addEventListener("click",()=>openRecordModal(Number(button.dataset.recordEdit))));
+    $("sourceTableBody").querySelectorAll("[data-record-delete]").forEach(button=>button.addEventListener("click",()=>deleteRecord(Number(button.dataset.recordDelete))));
     $("dataRecordCount").textContent=`${Number(data.total||0).toLocaleString()} records`;
     $("dataPageInfo").textContent=`Page ${state.dataPage} of ${state.dataTotalPages}`;
     $("dataPrev").disabled=state.dataPage<=1;$("dataNext").disabled=state.dataPage>=state.dataTotalPages;
@@ -154,6 +165,62 @@ async function loadSourceData(forceRefresh=false){
     $("dataError").hidden=false;$("dataError").textContent=error.message;$("dataRecordCount").textContent="—";$("dataPageInfo").textContent="—";
     $("dataSourceMeta").innerHTML=`<span class="source-meta-chip"><strong>Source tab:</strong> ${esc(source.tab)}</span>`;
   }finally{$("dataRefresh").disabled=false;}
+}
+
+async function openRecordModal(rowNumber=null){
+  const source=state.activeSource;if(!source||source.accessMode==="view_only")return;
+  $("recordForm").reset();$("recordFormError").hidden=true;$("saveRecordButton").disabled=true;$("saveRecordButton").textContent="Loading…";
+  try{
+    const schema=await api(`/.netlify/functions/data?source=${encodeURIComponent(source.id)}&action=schema`);
+    state.recordSchema=schema;state.editingRowNumber=rowNumber;
+    const row=rowNumber?state.currentRows.get(rowNumber)||[]:[];
+    $("recordModalTitle").textContent=rowNumber?"Edit Record":"Add Record";
+    $("recordModalNote").textContent=source.note||"Fields and dropdown options are loaded from the live Google Sheets validation rules.";
+    $("recordFields").innerHTML=(schema.columns||[]).filter(c=>c.editable).map(c=>{
+      const label=c.header||`Column ${c.index+1}`,value=row[c.index]??"",validation=c.validation||{},opts=validation.options||[];
+      let type="text";if(validation.type==="DATE_IS_VALID"||/date|tanggal|received|join/i.test(label))type="date";
+      else if(validation.type==="BOOLEAN")type="checkbox";
+      else if(/NUMBER|CURRENCY|PERCENT/i.test(c.numberFormat?.type||""))type="number";
+      else if(/link|url/i.test(label))type="url";
+      let control="";
+      if(opts.length)control=`<select name="${c.index}" ${validation.strict?"required":""}><option value="">Select ${esc(label)}</option>${opts.map(o=>`<option value="${escAttr(o)}" ${String(value)===String(o)?"selected":""}>${esc(o)}</option>`).join("")}</select>`;
+      else if(type==="checkbox")control=`<input type="checkbox" name="${c.index}" ${String(value).toLowerCase()==="true"||value===true?"checked":""}>`;
+      else control=`<input type="${type}" name="${c.index}" value="${escAttr(type==="date"?toDateInput(value):value)}" ${type==="date"||type==="url"?"":""} ${type==="url"?'placeholder="https://"':""}>`;
+      return `<label class="${type==="checkbox"?"field-full":""}">${esc(label)}${control}</label>`;
+    }).join("");
+    if(!schema.columns?.some(c=>c.editable))throw new Error("No editable columns are available for this record.");
+    $("recordModal").hidden=false;
+  }catch(error){toast(error.message);}
+  finally{$("saveRecordButton").disabled=false;$("saveRecordButton").textContent="Save Record";}
+}
+function toDateInput(value){
+  if(!value)return "";
+  const s=String(value);
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  const d=new Date(s);return Number.isNaN(d.getTime())?"":`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function closeRecordModal(){$("recordModal").hidden=true;state.editingRowNumber=null;}
+async function saveRecord(e){
+  e.preventDefault();const source=state.activeSource,btn=$("saveRecordButton"),err=$("recordFormError");if(!source||!state.recordSchema)return;
+  btn.disabled=true;btn.textContent="Saving…";err.hidden=true;
+  try{
+    const values={};$("recordFields").querySelectorAll("[name]").forEach(input=>{
+      if(input.type==="checkbox"){values[input.name]=input.checked;return;}
+      const v=input.value;if(v!=="")values[input.name]=v;
+    });
+    if(!Object.keys(values).length)throw new Error("Please fill in at least one editable field.");
+    const editing=!!state.editingRowNumber;
+    const payload=editing?{rowNumber:state.editingRowNumber,values}:{values};
+    await api(`/.netlify/functions/data?source=${encodeURIComponent(source.id)}`,{method:editing?"PATCH":"POST",body:JSON.stringify(payload)});
+    toast(editing?"Record updated.":"Record created.");closeRecordModal();await loadSourceData(true);
+  }catch(error){err.textContent=error.message;err.hidden=false;}
+  finally{btn.disabled=false;btn.textContent="Save Record";}
+}
+async function deleteRecord(rowNumber){
+  const source=state.activeSource;if(!source||source.accessMode!=="crud_candidate")return;
+  if(!confirm(`Clear editable fields for row ${rowNumber} in ${source.tab}? Formula cells will be preserved.`))return;
+  try{await api(`/.netlify/functions/data?source=${encodeURIComponent(source.id)}`,{method:"DELETE",body:JSON.stringify({rowNumber})});toast("Record cleared.");await loadSourceData(true);}
+  catch(error){toast(error.message);}
 }
 function formatCell(value){return value===null||value===undefined?"":String(value);}
 async function loadUsers(){
