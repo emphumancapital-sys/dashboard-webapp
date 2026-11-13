@@ -99,19 +99,12 @@ export const handler = async event => {
     // are deliberately excluded from the audit export.
     auditStage = "grid metadata and formula scan";
     auditStage = "grid metadata and formula scan";
-    const gridSheets = [];
-    for (let index = 0; index < sheetMeta.length; index++) {
-      const meta = sheetMeta[index];
-      const range = ranges[index];
-      const response = await sheets.spreadsheets.get({
-        spreadsheetId: SPREADSHEET_ID,
-        ranges: [range],
-        includeGridData: true,
-        fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(userEnteredValue,dataValidation))))"
-      });
-      gridSheets.push(...(response.data.sheets || []));
-    }
-    const gridResponse = { data: { sheets: gridSheets } };
+    const gridResponse = ranges.length ? await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID,
+      ranges,
+      includeGridData: true,
+      fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(userEnteredValue,dataValidation))))"
+    }) : { data: { sheets: [] } };
 
     const tabAudits = [];
     const validationSourceRanges = new Set();
@@ -137,7 +130,7 @@ export const handler = async event => {
             const rowNumber = baseRow + rowOffset + 1;
             const colNumber = baseCol + colOffset;
             const cellA1 = `${colToA1(colNumber)}${rowNumber}`;
-            const formula = cell.userEnteredValue?.userEnteredFormula;
+            const formula = cell.userEnteredValue?.formulaValue;
             if (formula) {
               formulaCount++;
               if (formulaSamples.length < MAX_FORMULA_SAMPLES_PER_TAB) {
