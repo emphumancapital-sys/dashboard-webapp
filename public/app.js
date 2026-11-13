@@ -189,15 +189,50 @@ function renderDashboard(d) {
   $("metricExtensionCaption").textContent = `${fmt(completion.extensionCompleted)} completed · ${pct(completion.extension)} completion`;
   const exits = d.movementCounts || {};
   $("yearCaption").textContent = `${fmt(exits.resignation)} resignation · ${fmt(exits.termination)} termination · ${fmt(exits.retirement)} retirement`;
-  $("contractCount").textContent = (d.contractAlerts || []).length + " upcoming";
   $("rfpCount").textContent = (d.rfpAlerts || []).length + " recent records";
   $("lastUpdated").textContent = "Updated " + new Date(d.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  $("contractRows").innerHTML = d.contractAlerts?.length ? d.contractAlerts.map(r => `<tr><td><div class="employee-cell"><b>${esc(r.employee)}</b><small>${esc(r.employeeId)} · ${esc(r.position)}</small></div></td><td>${esc(r.businessUnit)}</td><td>${esc(r.endDate)}</td><td><span class="days-chip ${r.daysRemaining <= 30 ? "critical" : r.daysRemaining > 60 ? "safe" : ""}">${r.daysRemaining === 0 ? "Today" : "In " + r.daysRemaining + " days"}</span></td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No contract end dates within the next 90 days.</td></tr>`;
+  state.dashboard = d; renderContracts(); renderJoiners(d);
   $("rfpRows").innerHTML = d.rfpAlerts?.length ? d.rfpAlerts.map(r => `<tr><td><div class="employee-cell"><b>${esc(r.position)}</b><small>${esc(r.rfpCode)}</small></div></td><td>${esc(r.businessUnit)}</td><td>${esc(r.contract)}</td><td>${esc(r.process)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No RFP records received in ${d.currentYear}.</td></tr>`;
   $("rfpYearCaption").textContent = String(d.currentYear || "");
   renderActivity(d.latestActivities || [], $("latestActivity"), false); renderActivity(d.activityHistory || [], $("historyList"), true);
   const warnings = d.warnings || []; $("warningBox").hidden = !warnings.length; $("warningBox").textContent = warnings.length ? warnings.join(" · ") : "";
   ["metricNewHire", "metricContract", "metricRfp", "metricYear"].forEach(countUp);
+}
+/* Contract reminders: rows that still need action first, rows already sent to C&B kept as muted information. */
+function renderContracts() {
+  const d = state.dashboard || {}, rows = d.contractAlerts || [], need = rows.filter(r => !r.done), done = rows.length - need.length, overdue = need.filter(r => r.state === "overdue").length;
+  $("contractCount").className = "count-pill " + (overdue ? "red" : need.length ? "amber" : "neutral");
+  $("contractCount").textContent = rows.length ? `${need.length} need action${done ? ` · ${done} done` : ""}` : "None";
+  $("contractFoot").textContent = overdue ? `${overdue} overdue · next 90 days` : "Next 90 days";
+  const remaining = r => r.daysRemaining < 0 ? `${-r.daysRemaining} day${r.daysRemaining === -1 ? "" : "s"} overdue` : r.daysRemaining === 0 ? "Today" : `In ${r.daysRemaining} day${r.daysRemaining === 1 ? "" : "s"}`;
+  $("contractRows").innerHTML = rows.length ? rows.map(r => `<tr class="${r.done ? "is-muted" : ""}${r.pending ? " is-pending" : ""}" data-contract="${r.rowNumber}">
+    <td><div class="employee-cell"><b>${esc(r.employee)}</b><small>${esc(r.employeeId)} · ${esc(r.position)}</small></div></td><td>${esc(r.businessUnit)}</td>
+    <td><div class="end-cell"><span class="days-chip ${r.done ? "neutral" : r.daysRemaining <= 30 ? "critical" : r.daysRemaining > 60 ? "safe" : ""}">${esc(remaining(r))}</span><small>${esc(r.endDate)}</small></div></td>
+    <td class="col-actions">${r.done ? `<span class="done-chip" title="No action needed. Listed until the contract ends.">${svgIcon("check", 12)}${esc(r.status)}</span>` : `<div class="row-actions"><button type="button" class="k-next" data-contract-action="sent" title="Mark as sent to C&amp;B">${svgIcon("send", 12)}<span>Sent to C&amp;B</span></button><button type="button" class="row-action" data-contract-menu title="Other status" aria-label="Other status for ${escAttr(r.employee)}" aria-haspopup="menu">${svgIcon("more", 15)}</button></div>`}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No contract end dates within the next 90 days.</td></tr>`;
+}
+function renderJoiners(d) {
+  const rows = d.upcomingJoiners || [];
+  $("joinerCount").textContent = rows.length ? `${rows.length} joining` : "None"; $("joinerCount").className = "count-pill " + (rows.length ? "blue" : "neutral");
+  $("joinerList").innerHTML = rows.length ? rows.map(r => `<div class="activity-item"><span class="avatar">${esc(initial(r.name))}</span><div class="activity-copy"><b>${esc(r.name)}</b><small>${esc([r.position, r.businessUnit, r.contract].filter(x => x && x !== "—").join(" · ") || "—")}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${r.daysUntil === 0 ? "Today" : r.daysUntil === 1 ? "Tomorrow" : `In ${r.daysUntil} days`}</span><small>${esc(r.joinDate)}</small></div></div>`).join("") : `<div class="empty-state">No one is joining in the next ${d.joinWindowDays || 7} days.</div>`;
+}
+function openContractMenu(button, rowNumber) {
+  if (Pop.current?.anchor === button) { Pop.close(); return; }
+  const panel = document.createElement("div"); panel.className = "select-pop stage-menu"; panel.setAttribute("role", "menu"); panel.tabIndex = -1;
+  panel.innerHTML = `<div class="pop-title">Set status</div><button type="button" role="menuitem" class="pop-option" data-action="sent"><span>Sent to C&amp;B</span></button><button type="button" role="menuitem" class="pop-option" data-action="resign"><span>Resign</span></button>`;
+  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b) return; Pop.close(); setContractStatus(rowNumber, b.dataset.action); });
+  Pop.open(button, panel); panel.querySelector(".pop-option").focus({ preventScroll: true });
+}
+async function setContractStatus(rowNumber, action) {
+  const row = (state.dashboard?.contractAlerts || []).find(r => r.rowNumber === rowNumber); if (!row || row.pending) return; const label = action === "resign" ? "Resign" : "Sent to C&B";
+  const ok = await confirmDialog({ title: `Mark ${row.employee} as ${label}?`, message: action === "resign" ? `STATUS in Extend 2026 is set to Resign. The contract stays listed here, without action, until ${row.endDate}.` : `STATUS in Extend 2026 is set to Sent to C&B. Nothing more is needed from you; the contract stays listed here as information until ${row.endDate}.`, confirmLabel: `Mark as ${label}`, icon: action === "resign" ? "log-out" : "send" });
+  if (!ok) return;
+  row.pending = true; renderContracts();
+  try {
+    const result = await api("/.netlify/functions/contracts", { method: "POST", body: JSON.stringify({ rowNumber, employee: row.employee, action }) });
+    Object.assign(row, { pending: false, done: true, status: result.value || label, state: action === "resign" ? "closed" : "sent" });
+    state.dashboard.contractAlerts = state.dashboard.contractAlerts.filter(r => r.daysRemaining >= 0 || !r.done).sort((a, b) => Number(a.done) - Number(b.done) || a.daysRemaining - b.daysRemaining);
+    renderContracts(); toast(`${row.employee} marked as ${result.value || label}.`, "success");
+  } catch (error) { row.pending = false; renderContracts(); toast(error.message, "error", { duration: 8000 }); }
 }
 function renderActivity(rows, target, history) {
   if (!rows.length) { target.innerHTML = `<div class="empty-state">${history ? "No activity in the last 10 days." : "No activity recorded yet."}</div>`; return; }
@@ -523,6 +558,10 @@ function bindPipeline() {
   $("pipeSearchClear").addEventListener("click", () => { $("pipeSearch").value = ""; $("pipeSearchClear").hidden = true; renderPipeline(); $("pipeSearch").focus(); });
   $("pipeBU").addEventListener("change", renderPipeline);
   $("pipeUnsent").addEventListener("click", () => openUnsentList($("pipeUnsent")));
+  $("contractRows").addEventListener("click", e => {
+    const tr = e.target.closest("[data-contract]"); if (!tr) return; const rowNumber = Number(tr.dataset.contract), action = e.target.closest("[data-contract-action]"), menu = e.target.closest("[data-contract-menu]");
+    if (action) setContractStatus(rowNumber, action.dataset.contractAction); else if (menu) openContractMenu(menu, rowNumber);
+  });
   bindLocalSort("pipeHead", "pipe", renderPipeline);
   bindLocalSort("pipeFailedHead", "pipeFailed", renderPipeline);
   $("pipeFailedRows").addEventListener("click", e => { const tr = e.target.closest("[data-pipe-row]"); if (tr) openPipeDetail(Number(tr.dataset.pipeRow)); });

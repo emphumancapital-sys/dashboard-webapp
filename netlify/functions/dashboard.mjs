@@ -31,6 +31,9 @@ function parseDate(value){
   const parsed=new Date(text);return Number.isNaN(parsed.getTime())?null:parsed;
 }
 function dateLabel(date){return date.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}
+const CONTRACT_WINDOW_DAYS=90, CONTRACT_OVERDUE_DAYS=30, JOIN_WINDOW_DAYS=7;
+// Statuses after which Human Capital has nothing left to do for the contract.
+export const contractDone=status=>/sent\s*to\s*c\s*(&|and|n)?\s*b|resign/i.test(String(status??""));
 function countRows(rows,index){return rows.filter(row=>String(val(row,index)).trim()!=="").length;}
 
 export const handler = async event => {
@@ -62,10 +65,27 @@ export const handler = async event => {
       rfpCode:String(val(row,rfpCode)||"—"),position:String(val(row,rfpPosition)||"—"),businessUnit:String(val(row,rfpBU)||"—"),contract:String(val(row,rfpContract)||"—"),process:String(val(row,rfpProcess)||"—"),received:dateLabel(date)
     }));
 
-    const endDate=col(extension.headers,"END CONTRACT"),extName=col(extension.headers,"NAME"),extId=col(extension.headers,"ID"),extBU=col(extension.headers,"BUSINESS UNIT"),extPosition=col(extension.headers,"POSITION"),extStatus=col(extension.headers,"RFP STATUS");
-    const contractAlerts=extension.rows.map(row=>({row,date:parseDate(val(row,endDate))})).filter(item=>item.date).map(({row,date})=>({
-      employee:String(val(row,extName)||"—"),employeeId:String(val(row,extId)||"—"),businessUnit:String(val(row,extBU)||"—"),position:String(val(row,extPosition)||"—"),status:String(val(row,extStatus)||"—"),date,daysRemaining:Math.ceil((date-today)/86400000)
-    })).filter(item=>item.daysRemaining>=0&&item.daysRemaining<=90).sort((a,b)=>a.daysRemaining-b.daysRemaining).slice(0,10).map(item=>({...item,endDate:dateLabel(item.date),date:undefined}));
+    // Contract reminders (Extend 2026). Column O "STATUS" decides whether HC still has to act:
+    // "Sent to C&B" or "Resign" means done. Done rows stay listed until the end date as information only.
+    const extValues=data.get("extension")?.values||[];
+    const endDate=col(extension.headers,"END CONTRACT"),extName=col(extension.headers,"NAME"),extId=col(extension.headers,"ID"),extBU=col(extension.headers,"BUSINESS UNIT"),extPosition=col(extension.headers,"POSITION");
+    const extStatus=col(extension.headers,"STATUS")>-1?col(extension.headers,"STATUS"):14;
+    const contractAll=extValues.slice(1).map((row,index)=>({row,rowNumber:3+index})).filter(({row})=>[9,4].some(i=>row[i]!==undefined&&row[i]!==null&&row[i]!=="")).map(({row,rowNumber})=>{
+      const date=parseDate(val(row,endDate));if(!date)return null;
+      const status=String(val(row,extStatus)||"").trim(),done=contractDone(status),daysRemaining=Math.ceil((date-today)/86400000);
+      return {rowNumber,employee:String(val(row,extName)||"—"),employeeId:String(val(row,extId)||"—"),businessUnit:String(val(row,extBU)||"—"),position:String(val(row,extPosition)||"—"),status,done,daysRemaining,endDate:dateLabel(date),
+        state:done?(/resign/i.test(status)?"closed":"sent"):daysRemaining<0?"overdue":"due"};
+    }).filter(Boolean)
+      // Next 90 days, plus contracts that ended in the last 30 days and were never marked done.
+      .filter(item=>(item.daysRemaining>=0&&item.daysRemaining<=CONTRACT_WINDOW_DAYS)||(!item.done&&item.daysRemaining<0&&item.daysRemaining>=-CONTRACT_OVERDUE_DAYS))
+      .sort((a,b)=>Number(a.done)-Number(b.done)||a.daysRemaining-b.daysRemaining);
+    const contractAlerts=contractAll.slice(0,100);
+
+    // People joining in the next 7 days (New Hire 2026). Information only.
+    const nhJoin=col(newHire.headers,"Join Date"),nhName=col(newHire.headers,"Name"),nhPosition=col(newHire.headers,"Position"),nhBU=col(newHire.headers,"Business Unit"),nhContract=col(newHire.headers,"Contract"),nhId=col(newHire.headers,"ID");
+    const upcomingJoiners=newHire.rows.map(row=>({row,date:parseDate(val(row,nhJoin))})).filter(item=>item.date).map(({row,date})=>({
+      name:String(val(row,nhName)||"—"),employeeId:String(val(row,nhId)||""),position:String(val(row,nhPosition)||"—"),businessUnit:String(val(row,nhBU)||"—"),contract:String(val(row,nhContract)||""),joinDate:dateLabel(date),daysUntil:Math.ceil((date-today)/86400000)
+    })).filter(item=>item.daysUntil>=0&&item.daysUntil<=JOIN_WINDOW_DAYS).sort((a,b)=>a.daysUntil-b.daysUntil||a.name.localeCompare(b.name)).slice(0,50);
 
     const movementReason=col(movement.headers,"REASON");
     const movementCounts={newHire:0,resignation:0,termination:0,retirement:0};
@@ -84,7 +104,8 @@ export const handler = async event => {
         employeeExitRecords:dashboardMetrics.resignation+dashboardMetrics.termination+dashboardMetrics.retirement
       },
       completion:{rfp:dashboardMetrics.rfpRate,newHire:dashboardMetrics.newHireRate,extension:dashboardMetrics.extensionRate,rfpCompleted:dashboardMetrics.rfpCompleted,newHireCompleted:dashboardMetrics.newHireCompleted,extensionCompleted:dashboardMetrics.extensionCompleted},
-      contractAlerts,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
+      contractAlerts,contractSummary:{needAction:contractAll.filter(x=>!x.done).length,overdue:contractAll.filter(x=>x.state==="overdue").length,done:contractAll.filter(x=>x.done).length,windowDays:CONTRACT_WINDOW_DAYS},
+      upcomingJoiners,joinWindowDays:JOIN_WINDOW_DAYS,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
       latestActivities:activities.slice(0,5),activityHistory:activities,warnings,
       dataBasis:{rfp:"2026 Rec Pipeline",newHire:"New Hire 2026",extension:"Extend 2026",employees:"Data Valid Employees",movement:"New Hire vs Exit",tpc:"2026 TPC Pipeline"}
     });

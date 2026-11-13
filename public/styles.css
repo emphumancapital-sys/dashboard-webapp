@@ -311,6 +311,16 @@ tbody tr:hover .row-action{color:var(--ink-2)}.row-action:hover,tbody tr:hover .
 .text-button.danger{color:var(--red)}.text-button.danger:hover{background:var(--red-bg)}.modal-hint:has(button){display:flex;align-items:center;gap:6px}
 .info-grid dd.is-multiline{white-space:pre-line;font-weight:400;font-size:12.5px;line-height:1.55}.unsent-row small.is-retry{color:var(--amber)}
 
+/* Overview: contract reminders + joining soon */
+#historyPanel{grid-column:1/-1}.count-pill.red{background:var(--red-bg);color:var(--red)}.count-pill.neutral,.days-chip.neutral{background:var(--hover);color:var(--muted)}
+tr.is-muted td{color:var(--faint)}tr.is-muted .employee-cell b{color:var(--muted);font-weight:500}tr.is-muted:hover td{color:var(--ink-2)}tr.is-pending{opacity:.55;pointer-events:none}
+.done-chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:99px;background:var(--brand-soft);color:var(--brand-ink);font-size:11.5px;font-weight:600;white-space:nowrap}.done-chip svg{width:12px;height:12px}
+#contractRows .row-actions{align-items:center;gap:4px}#contractRows td.col-actions{text-align:right;white-space:nowrap}th.col-actions{text-align:right}
+.dashboard-grid .reminder-scroll{max-height:300px}.end-cell{display:flex;flex-direction:column;align-items:flex-start;gap:3px}.end-cell small{color:var(--muted);font-size:11.5px}
+#contractRows td.col-actions,.reminder-scroll th.col-actions{position:sticky;right:0;width:1%;padding-left:8px}#contractRows td.col-actions{background:linear-gradient(var(--rowbg),var(--rowbg)),var(--solid)}.reminder-scroll th.col-actions{z-index:3}
+@media(max-width:720px){.reminder-scroll th:nth-child(2),#contractRows td:nth-child(2),#contractRows .k-next span{display:none}#contractRows .k-next{padding:0 8px}}
+.joiner-when{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none}.joiner-when small{color:var(--faint);font-size:11px}
+
 /* ---------- Responsive ---------- */
 @media(max-width:1050px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-grid{grid-template-columns:1fr}.data-toolbar .search-box{width:240px}}
 @media(max-width:720px){.login-shell{grid-template-columns:1fr;padding:10px}.login-aside{display:none}.login-card{min-height:calc(100vh - 20px)}
