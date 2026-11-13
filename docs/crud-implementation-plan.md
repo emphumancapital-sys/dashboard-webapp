@@ -21,7 +21,7 @@ Only worksheets whose `sheetState` is `visible` in the supplied workbook are in 
 | EMP User Management | System managed | Existing user-management workflow only. |
 | EMP Activity Log | System managed | Append-only audit trail. |
 
-`Offer` and `2026 TPC Pipeline` are not included because they are not confirmed as visible in the supplied workbook. All hidden tabs remain excluded regardless of whether they contain operational data.
+`Offer`, `2026 TPC Pipeline`, `Pivot Dashboard 2026`, `RFP Deletion`, and `Resource Deletion` are excluded because they are not confirmed as visible in the supplied audit. `EMP User Management` and `EMP Activity Log` are app-managed system tabs, not ordinary data-navigation sources. All hidden tabs remain excluded regardless of whether they contain operational data.
 
 ## Safety rules for implementation
 
@@ -48,3 +48,8 @@ Only worksheets whose `sheetState` is `visible` in the supplied workbook are in 
 ## Current implementation status
 
 This package adds the audited schema foundation only. It does not yet enable write operations. CRUD endpoints should be added only after the schema and per-row formula protections are implemented and tested against a live Editor-authorized spreadsheet. This avoids accidental changes to formulas or linked recruitment records.
+
+
+## Repository 1.2 audit correction
+
+The data-source registry has been aligned to the 10 visible business tabs confirmed by the latest audit. The app-managed user and activity sheets remain in their dedicated modules. The data page continues to be read-only in this patch; CRUD write endpoints and forms have not yet been implemented. Technical source metadata chips above the table are hidden while the record count and refresh action remain visible.

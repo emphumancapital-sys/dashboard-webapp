@@ -7,25 +7,24 @@ const MAIN_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2
 // Source map rebuilt from the uploaded Recruitment Pipeline.xlsx workbook.
 // Header/data row positions and ranges are intentionally explicit per tab.
 const SOURCES = [
-  { id:"rfp", label:"Request for Personnel", group:"Recruitment & Staffing", tab:"2026 Rec Pipeline", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"AI", identityColumns:[0,5] },
-  { id:"spk", label:"Psychotest (SPK)", group:"Recruitment & Staffing", tab:"SPK 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[2,4] },
-  { id:"mcu", label:"Medical Check Up (MCU)", group:"Recruitment & Staffing", tab:"MCU 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"P", identityColumns:[3] },
-  { id:"mcu-induction", label:"MCU Induction", group:"Recruitment & Staffing", tab:"MCU Induction 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"H", identityColumns:[2], schemaStatus:"needs_attention", schemaMessage:"Tab exists, but its header row currently contains #REF! and does not define a complete data table. The table is withheld to avoid showing incorrect column names." },
-  { id:"extension", label:"Contract Extension", group:"Recruitment & Staffing", tab:"Extend 2026", headerRow:2, dataStartRow:3, startColumn:"A", endColumn:"U", identityColumns:[9,4] },
-  { id:"new-hire", label:"New Hire", group:"Recruitment & Staffing", tab:"New Hire 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[4,1] },
-  { id:"tpc", label:"TPC Pipeline", group:"Recruitment & Staffing", tab:"2026 TPC Pipeline", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"U", identityColumns:[0,5] },
-  { id:"offer", label:"Offer Tracking", group:"Recruitment & Staffing", tab:"Offer", headerRow:2, dataStartRow:3, startColumn:"A", endColumn:"H", identityColumns:[2], schemaStatus:"needs_attention", schemaMessage:"The second row mixes a company value in column A with field labels in columns B–G. A reliable table header cannot be inferred without changing the source workbook." },
-  { id:"employee-db", label:"Employee Database", group:"Employee Records", tab:"Data Valid Employees", headerRow:3, dataStartRow:4, startColumn:"A", endColumn:"N", identityColumns:[0,1] },
-  { id:"movement", label:"New Hire vs Exit", group:"Employee Records", tab:"New Hire vs Exit", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"C", identityColumns:[0] },
-  { id:"pivot-dashboard", label:"Pivot Dashboard 2026", group:"Reports & Logs", tab:"Pivot Dashboard 2026", headerRow:3, dataStartRow:4, startColumn:"AX", endColumn:"BC", identityColumns:[0,1,3,4,5] },
-  { id:"rfp-deletion", label:"RFP Deletion Log", group:"Reports & Logs", tab:"RFP Deletion", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[2,4] },
-  { id:"resource-deletion", label:"Resource Deletion Log", group:"Reports & Logs", tab:"Resource Deletion", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"AG", identityColumns:[2] }
+  // Business tabs confirmed visible in the 2026-11-13 spreadsheet audit.
+  { id:"dashboard", label:"Dashboard", group:"Overview & Reports", tab:"Dashboard 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"M", identityColumns:[], accessMode:"view_only" },
+  { id:"rfp-master", label:"Request for Personnel", group:"Recruitment & Staffing", tab:"RFP 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"S", identityColumns:[0,5], accessMode:"crud_candidate" },
+  { id:"rfp-pipeline", label:"Recruitment Pipeline", group:"Recruitment & Staffing", tab:"2026 Rec Pipeline", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"AI", identityColumns:[0,5], accessMode:"crud_candidate" },
+  { id:"mcu", label:"Medical Check Up (MCU)", group:"Recruitment & Staffing", tab:"MCU 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[3], accessMode:"crud_candidate" },
+  { id:"mcu-induction", label:"MCU Induction", group:"Recruitment & Staffing", tab:"MCU Induction 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"H", identityColumns:[2], accessMode:"view_only", schemaStatus:"needs_attention", schemaMessage:"This tab is populated through IMPORTRANGE and its imported header is not a safe CRUD schema. It is excluded from write operations." },
+  { id:"spk", label:"Psychotest (SPK)", group:"Recruitment & Staffing", tab:"SPK 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[2,4], accessMode:"crud_candidate" },
+  { id:"extension", label:"Contract Extension", group:"Recruitment & Staffing", tab:"Extend 2026", headerRow:2, dataStartRow:3, startColumn:"A", endColumn:"U", identityColumns:[9,4], accessMode:"crud_candidate" },
+  { id:"new-hire", label:"New Hire", group:"Employee Records", tab:"New Hire 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[4,1], accessMode:"crud_candidate" },
+  { id:"employee-db", label:"Employee Database", group:"Employee Records", tab:"Data Valid Employees", headerRow:3, dataStartRow:4, startColumn:"A", endColumn:"N", identityColumns:[0,1], accessMode:"view_only" },
+  { id:"movement", label:"New Hire vs Exit", group:"Employee Records", tab:"New Hire vs Exit", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"C", identityColumns:[0], accessMode:"crud_candidate" }
 ];
 
 const publicSource = source => ({
   id:source.id, label:source.label, group:source.group, tab:source.tab,
   headerRow:source.headerRow, dataStartRow:source.dataStartRow,
   status:source.schemaStatus || "ready",
+  accessMode:source.accessMode || "view_only",
   schemaMessage:source.schemaMessage || null,
   available:true
 });
