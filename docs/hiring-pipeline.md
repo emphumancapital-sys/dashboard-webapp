@@ -67,3 +67,16 @@ Defined in `netlify/functions/_lib/presets.mjs` and applied to `RFP 2026` and `2
 - Values are matched case-insensitively to the standard spelling, so `jakarta` and `JAKARTA` are stored as `Jakarta`.
 - Existing rows keep their current values until they are edited. An old value stays selectable in the edit form for that row.
 - These presets replace the sheet's own dropdown rule for the same columns inside the app. If those columns have a dropdown in the sheet with different options, Sheets will flag the new values there until the sheet's dropdown is updated to match.
+
+## Merged cells (fix for "You can't perform a paste that partially intersects a merge")
+- Cause: when a row is created, formula columns are copied down from the row above with a Sheets `copyPaste`. Sheets rejects a paste that covers only part of a merged range, and the whole batch fails. Nothing had been written at that point.
+- `copyFormulaColumnsFromPrevious` in `_lib/sheets.mjs` now reads the tab's merged ranges first. A formula cell inside a one-row merge is copied as the whole merged range; a source row merged across several rows is skipped in favour of an earlier formula row. This also applies to Add Record on every tab that copies formulas down.
+- If the target row itself has a merge that the copy cannot respect, or a merge that would swallow a value, the request is refused with the exact range (for example `B46:C47`) so it can be unmerged in the sheet.
+- Copying format and data validation onto a newly appended row is now best effort when the row above touches a merge.
+
+## What the pipeline features can and cannot change in `2026 Rec Pipeline`
+- Never done by the app: inserting or deleting rows, sorting, merging or unmerging, changing cell formats, column widths, conditional formatting or dropdown rules of existing rows.
+- New rows always go below the last existing record, for Send to pipeline and for Add Record on every tab. An empty row in the middle of the data is never reused, and a row below the data that holds anything in a non-formula column (notes, totals) is skipped rather than written over. Formulas are copied with `PASTE_FORMULA` only (no formatting).
+- If a send is refused after the row was prepared, the values are cleared and formula cells that were empty before are cleared again, leaving the row as it was.
+- Kanban moves write one date cell (U, V, W, X or AD), clear later date cells on a backward move, and Complete/Reopen writes one cell in Q.
+- Values are entered with `USER_ENTERED`, so how a date looks depends on the format of the cell it lands in.

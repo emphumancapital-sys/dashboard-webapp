@@ -1,6 +1,6 @@
 import { json, bodyOf } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
-import { readManyTabsFromSpreadsheet, getSheetRowFormulas, getSheetCrudMetadata, writeSheetValues, clearSheetValues, addActivity, inferColumnMeta, toIsoDate, ensureSheetRowExists, copyFormulaColumnsFromPrevious } from "./_lib/sheets.mjs";
+import { readManyTabsFromSpreadsheet, getSheetRowFormulas, getSheetCrudMetadata, writeSheetValues, clearSheetValues, addActivity, inferColumnMeta, toIsoDate, ensureSheetRowExists, copyFormulaColumnsFromPrevious, getSheetMerges, mergeAt, mergeLabel } from "./_lib/sheets.mjs";
 
 // Hiring Pipeline: a stage view over the recruitment pipeline tab.
 // A request's stage is the right-most stage column that holds a value, so the sheet stays the single source of truth.
@@ -73,30 +73,49 @@ async function sendToPipeline(actor, body){
   if (existing) return json(409, { error:`${code} is already in ${TAB} (row ${existing.rowNumber}).`, rowNumber: existing.rowNumber });
   const ongoing = await statusValueFor("ongoing", cols, records);
   if (cols.status > -1 && !ongoing) return json(422, { error:`No "ongoing" value was found in the ${STATUS.header} dropdown or in existing rows, so the app will not guess one. Set it once in the sheet and try again.` });
-  // First free row: no RFP Code and no Position.
-  let rowNumber = DATA_START; while (filled(values[rowNumber - HEADER_ROW]?.[cols.info.code]) || filled(values[rowNumber - HEADER_ROW]?.[cols.info.position])) rowNumber++;
+  // A row is free when every non-formula cell in A:AI is empty, so a notes or total row is never written over.
+  const formulaIndexes = new Set(FORMULA_COLUMNS.map(colIndex));
+  const rowIsFree = n => (values[n - HEADER_ROW] || []).every((v, i) => formulaIndexes.has(i) || String(v ?? "").trim() === "");
+  // Always append below the last existing record; an empty row in the middle of the data is never reused.
+  let rowNumber = records.reduce((max, r) => Math.max(max, r.rowNumber), DATA_START - 1) + 1; while (rowNumber <= 10000 && !rowIsFree(rowNumber)) rowNumber++;
   if (rowNumber > 10000) return json(400, { error:"No free row was found in the pipeline tab." });
   const metaInfo = await getSheetCrudMetadata(MAIN_ID, TAB, HEADER_ROW, DATA_START, START, END);
-  await ensureSheetRowExists(MAIN_ID, metaInfo.sheetId, rowNumber, START, END);
-  await copyFormulaColumnsFromPrevious(MAIN_ID, metaInfo.sheetId, TAB, DATA_START, rowNumber, FORMULA_COLUMNS);
+  // Preparing the row (formulas) happens before any value is written, so a failure here leaves the data untouched.
+  let merges = [];
+  // Remember which formula cells were empty beforehand, so a refused send can put the row back exactly as it was.
+  let before = []; try { before = await getSheetRowFormulas(MAIN_ID, TAB, rowNumber, START, END); } catch { before = []; }
+  const undoFormulas = async () => { const ranges = FORMULA_COLUMNS.filter(letter => String(before[colIndex(letter)] ?? "") === "").map(letter => `${quoted}!${letter}${rowNumber}`); if (ranges.length) { try { await clearSheetValues(MAIN_ID, ranges); } catch { /* best effort */ } } };
+  try {
+    await ensureSheetRowExists(MAIN_ID, metaInfo.sheetId, rowNumber, START, END);
+    merges = await getSheetMerges(MAIN_ID, metaInfo.sheetId);
+    await copyFormulaColumnsFromPrevious(MAIN_ID, metaInfo.sheetId, TAB, DATA_START, rowNumber, FORMULA_COLUMNS);
+  } catch (error) {
+    const inRow = merges.filter(m => rowNumber - 1 >= m.startRowIndex && rowNumber - 1 < m.endRowIndex && m.startColumnIndex <= colIndex(END)).map(mergeLabel);
+    const message = String(error.message || "unknown error");
+    return json(409, { error: /Nothing was written/.test(message) ? message : `Could not prepare row ${rowNumber} of ${TAB}: ${message}${inRow.length ? ` Merged cells in that row: ${inRow.join(", ")}.` : ""} Nothing was written.` });
+  }
+  // A value written into a merged cell that is not the merge's top-left cell is silently dropped by Sheets, so refuse instead.
+  const dropped = col => { const m = mergeAt(merges, rowNumber - 1, col); return m && (m.startRowIndex !== rowNumber - 1 || m.startColumnIndex !== col) ? m : null; };
   const formulas = await getSheetRowFormulas(MAIN_ID, TAB, rowNumber, START, END);
   // Copy every RFP column that has a same-named, non-formula column in the pipeline tab.
-  const rfpFormula = new Set(RFP.formulaColumns.map(colIndex)), writes = [];
+  const rfpFormula = new Set(RFP.formulaColumns.map(colIndex)), writes = [], blocked = [];
   rfp.headers.forEach((header, i) => {
     if (!header || rfpFormula.has(i)) return; const target = headers.findIndex(h => norm(h) === norm(header));
     if (target < 0 || target === cols.status || isFormula(formulas[target]) || FORMULA_COLUMNS.includes(colLetter(target))) return;
-    const value = String(source.row[i] ?? "").trim(); if (value) writes.push({ range:`${quoted}!${colLetter(target)}${rowNumber}`, values:[[value.startsWith("=") ? "'" + value : value]] });
+    const value = String(source.row[i] ?? "").trim(); if (value && dropped(target)) blocked.push(`${header} (${mergeLabel(dropped(target))})`); else if (value) writes.push({ range:`${quoted}!${colLetter(target)}${rowNumber}`, values:[[value.startsWith("=") ? "'" + value : value]] });
   });
   if (cols.status > -1 && !isFormula(formulas[cols.status])) writes.push({ range:`${quoted}!${colLetter(cols.status)}${rowNumber}`, values:[[ongoing]] });
   // If RFP Code is not a formula in the new row, carry the existing code over as text (it is never generated here).
   if (!isFormula(formulas[cols.info.code])) writes.push({ range:`${quoted}!${colLetter(cols.info.code)}${rowNumber}`, values:[[code]] });
+  if (blocked.length) await undoFormulas();
+  if (blocked.length) return json(409, { error:`Row ${rowNumber} of ${TAB} has merged cells that would swallow these values: ${blocked.join(", ")}. Unmerge them in the sheet, then try again. Nothing was written.` });
   if (!writes.length) return json(400, { error:"No matching columns were found between the RFP tab and the pipeline tab." });
   await writeSheetValues(MAIN_ID, writes);
   // Safety check: the new row must resolve to this RFP's code. If the sheet's formula says otherwise, undo and report.
   const after = String((await readLiveRow(rowNumber))[cols.info.code] ?? "").trim();
   if (after !== code) {
-    await clearSheetValues(MAIN_ID, writes.map(w => w.range));
-    return json(409, { error:`Not sent. The new pipeline row (row ${rowNumber}) showed RFP Code "${after || "empty"}" instead of "${code}", so the values were removed again. The RFP Code formula in ${TAB} needs a row in a specific position; add this one in the sheet.` });
+    await clearSheetValues(MAIN_ID, writes.map(w => w.range)); await undoFormulas();
+    return json(409, { error:`Not sent. The new pipeline row (row ${rowNumber}) showed RFP Code "${after || "empty"}" instead of "${code}", so the row was emptied again. The RFP Code formula in ${TAB} needs a row in a specific position; add this one in the sheet.` });
   }
   await logActivity(actor, code, `${code}: sent to pipeline (row ${rowNumber})`);
   return json(201, { success:true, rowNumber, code });

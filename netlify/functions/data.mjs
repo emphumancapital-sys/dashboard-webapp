@@ -53,12 +53,15 @@ async function findNextRow(source){
   const api=google.sheets({version:"v4",auth});
   const response=await api.spreadsheets.values.get({spreadsheetId:MAIN_ID,range,valueRenderOption:"FORMATTED_VALUE"});
   const values=response.data.values||[];
-  for(let i=0;i<2000;i++){
-    const row=values[i]||[];
-    const hasIdentity=source.identityColumns.some(index=>row[index]!==undefined&&row[index]!==""&&row[index]!==null);
-    if(!hasIdentity)return start+i;
-  }
-  throw new Error("No empty row found in the first 2,000 data rows. Please extend the sheet capacity or contact an administrator.");
+  // Always append below the last existing record; an empty row in the middle of the data is never reused.
+  const hasIdentity=row=>source.identityColumns.some(index=>row?.[index]!==undefined&&row[index]!==""&&row[index]!==null);
+  let last=-1;for(let i=0;i<values.length;i++)if(hasIdentity(values[i]))last=i;
+  // Skip any row below that still holds something in a non-formula column (notes, totals), so it is never written over.
+  const formulaIndexes=new Set((source.formulaColumns||[]).map(letter=>{let n=0;for(const ch of letter)n=n*26+ch.charCodeAt(0)-64;return n-1;}));
+  const isEmpty=row=>(row||[]).every((value,index)=>formulaIndexes.has(index)||String(value??"").trim()==="");
+  let next=last+1;while(next<values.length&&!isEmpty(values[next]))next++;
+  if(start+next>10000)throw new Error("The sheet has reached row 10,000. Please contact an administrator.");
+  return start+next;
 }
 // Presets (fixed choices / fixed values) for the RFP tabs. Returns Map<columnIndex,{preset,options}>.
 async function loadPresets(source, columns){

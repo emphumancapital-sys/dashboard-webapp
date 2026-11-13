@@ -413,18 +413,16 @@ export async function ensureSheetRowExists(spreadsheetId, sheetId, targetRow, st
   if (targetRow > currentRows && targetRow > 1) {
     const startColIndex = columnIndex(startColumn);
     const endColIndex = columnIndex(endColumn) + 1;
-    await client.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [
-      { copyPaste: {
-        source: { sheetId, startRowIndex: targetRow - 2, endRowIndex: targetRow - 1, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
-        destination: { sheetId, startRowIndex: targetRow - 1, endRowIndex: targetRow, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
-        pasteType: "PASTE_FORMAT", pasteOrientation: "NORMAL"
-      }},
-      { copyPaste: {
-        source: { sheetId, startRowIndex: targetRow - 2, endRowIndex: targetRow - 1, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
-        destination: { sheetId, startRowIndex: targetRow - 1, endRowIndex: targetRow, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
-        pasteType: "PASTE_DATA_VALIDATION", pasteOrientation: "NORMAL"
-      }}
-    ]}});
+    const rowCopy = pasteType => ({ copyPaste: {
+      source: { sheetId, startRowIndex: targetRow - 2, endRowIndex: targetRow - 1, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
+      destination: { sheetId, startRowIndex: targetRow - 1, endRowIndex: targetRow, startColumnIndex: startColIndex, endColumnIndex: endColIndex },
+      pasteType, pasteOrientation: "NORMAL"
+    }});
+    // Best effort, one request each: a merged cell in the previous row must not stop the record from being created.
+    for (const pasteType of ["PASTE_FORMAT", "PASTE_DATA_VALIDATION"]) {
+      try { await client.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: [rowCopy(pasteType)] } }); }
+      catch (error) { if (!/merge/i.test(String(error?.message || ""))) throw error; }
+    }
   }
 }
 
@@ -451,29 +449,54 @@ export async function copyRowFormulas(spreadsheetId, sheetId, sourceRow, targetR
 }
 function columnIndex(label){let n=0;for(const c of String(label).toUpperCase())n=n*26+c.charCodeAt(0)-64;return n-1;}
 
+// Merged ranges of one sheet, as 0-based half-open grid ranges.
+export async function getSheetMerges(spreadsheetId, sheetId) {
+  const client = await api();
+  const book = await client.spreadsheets.get({ spreadsheetId, fields: "sheets(properties(sheetId),merges)" });
+  return (book.data.sheets || []).find(item => item.properties?.sheetId === sheetId)?.merges || [];
+}
+function columnLabel(index){let n=index+1,s="";while(n){const r=(n-1)%26;s=String.fromCharCode(65+r)+s;n=Math.floor((n-1)/26);}return s;}
+export function mergeLabel(m){return `${columnLabel(m.startColumnIndex)}${m.startRowIndex+1}:${columnLabel(m.endColumnIndex-1)}${m.endRowIndex}`;}
+export function mergeAt(merges,row,col){return merges.find(m=>row>=m.startRowIndex&&row<m.endRowIndex&&col>=m.startColumnIndex&&col<m.endColumnIndex)||null;}
+
+// Copies each formula column down into targetRow from the nearest row above that has a formula.
+// Merge-aware: Sheets refuses a paste that covers only part of a merged range, so a cell that sits in a
+// one-row merge (for example B:C merged on every row) is copied as the whole merged range, and a source
+// row whose cell is merged across several rows is skipped in favour of an earlier row.
 export async function copyFormulaColumnsFromPrevious(spreadsheetId,sheetId,title,startRow,targetRow,columns) {
   if(!columns?.length || targetRow<=startRow)return;
   const client=await api();
-  const requests=[];
   const quoted=`'${String(title).replace(/'/g,"''")}'`;
   const ranges=columns.map(letter=>`${quoted}!${letter}${startRow}:${letter}${targetRow-1}`);
   const response=await client.spreadsheets.values.batchGet({spreadsheetId,ranges,valueRenderOption:"FORMULA"});
   const valueRanges=response.data.valueRanges||[];
+  const merges=await getSheetMerges(spreadsheetId,sheetId);
+  const destRow=targetRow-1, requests=[], done=new Set();
   columns.forEach((letter,index)=>{
-    const values=valueRanges[index]?.values||[];
-    let sourceRow=0;
-    for(let i=0;i<values.length;i++){
+    const values=valueRanges[index]?.values||[], col=columnIndex(letter);
+    // Nearest formula above the target whose cell is either unmerged or merged within its own row only.
+    let sourceRow=0, span=null;
+    for(let i=values.length-1;i>=0;i--){
       const value=values[i]?.[0];
-      if(typeof value==="string"&&value.startsWith("="))sourceRow=startRow+i;
+      if(typeof value!=="string"||!value.startsWith("="))continue;
+      const m=mergeAt(merges,startRow+i-1,col);
+      if(m&&m.endRowIndex-m.startRowIndex>1)continue;
+      sourceRow=startRow+i;span=m;break;
     }
-    if(sourceRow){
-      const col=columnIndex(letter);
-      requests.push({copyPaste:{
-        source:{sheetId,startRowIndex:sourceRow-1,endRowIndex:sourceRow,startColumnIndex:col,endColumnIndex:col+1},
-        destination:{sheetId,startRowIndex:targetRow-1,endRowIndex:targetRow,startColumnIndex:col,endColumnIndex:col+1},
-        pasteType:"PASTE_FORMULA",pasteOrientation:"NORMAL"
-      }});
+    if(!sourceRow)return;
+    const startCol=span?span.startColumnIndex:col, endCol=span?span.endColumnIndex:col+1;
+    const key=`${startCol}:${endCol}`;if(done.has(key))return;
+    // The destination must not cut through a merge either.
+    for(let c=startCol;c<endCol;c++){
+      const d=mergeAt(merges,destRow,c);
+      if(d&&(d.endRowIndex-d.startRowIndex>1||d.startColumnIndex<startCol||d.endColumnIndex>endCol))throw new Error(`Row ${targetRow} of "${title}" has merged cells (${mergeLabel(d)}) where the formula for column ${letter} must go. Unmerge that range in the sheet, then try again. Nothing was written.`);
     }
+    done.add(key);
+    requests.push({copyPaste:{
+      source:{sheetId,startRowIndex:sourceRow-1,endRowIndex:sourceRow,startColumnIndex:startCol,endColumnIndex:endCol},
+      destination:{sheetId,startRowIndex:destRow,endRowIndex:destRow+1,startColumnIndex:startCol,endColumnIndex:endCol},
+      pasteType:"PASTE_FORMULA",pasteOrientation:"NORMAL"
+    }});
   });
   if(requests.length)await client.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests}});
 }
