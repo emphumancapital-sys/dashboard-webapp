@@ -46,3 +46,24 @@ A request's stage is the right-most stage column that holds a value. The sheet i
 - `node --check` passes for `pipeline.mjs`, `_lib/sheets.mjs`, `public/app.js`.
 - Exercised in Chrome against an in-memory spreadsheet stub that runs the real `pipeline.mjs`: forward move, skip, drag and drop, backward move, blocked moves, detail edit, complete, reopen, formula-managed status, changed-row refusal, search, filter, dark theme, 390px viewport.
 - Not exercised against the live Google Sheet. The header names, the status wording and which columns are formulas come from `docs/crud-schema.json` and were not checked against the live sheet.
+
+## Send to pipeline (added after the first kanban build)
+- An RFP reaches the board only when it is sent. In the Request for Personnel table each row has a send icon; rows already in the pipeline show a check mark instead. The Hiring Pipeline toolbar also lists RFPs that are in `RFP 2026` but not yet in `2026 Rec Pipeline`, each with a Send button.
+- `POST pipeline` `{ action: "send", rfpRowNumber, code }` creates one row in `2026 Rec Pipeline` at the first free row: formula columns are copied down from the previous row, every RFP column with a same-named non-formula column in the pipeline tab is copied (RFP Received through Initiator), and `RFP Process` is set to the sheet's own "ongoing" spelling.
+- An RFP whose code already exists in the pipeline tab is refused.
+- After writing, the new row's RFP Code is read back. If it is not the code that was sent, the written values are cleared again and the user is told. The RFP Code formula in the pipeline tab was not available when this was built, so this check is what protects against a position-dependent formula.
+- One RFP is one pipeline row.
+
+## Form presets for the RFP tabs
+Defined in `netlify/functions/_lib/presets.mjs` and applied to `RFP 2026` and `2026 Rec Pipeline` by header name.
+
+| Field | Behaviour |
+|---|---|
+| Required Person | Shown disabled, always `1` on create. Remove the `required person` line in `presets.mjs` to open it again. |
+| Location | `Field`, `Office`. Anything else is rejected by the server. |
+| Grade Level | `Non Staff`, `Staff`, `Senior Staff`, `Manager`, followed by any other value already used in the column. |
+| Point of Hire | Searchable list of Indonesian cities plus cities already used in the column. A city that is not listed can be typed and is stored in Title Case. |
+
+- Values are matched case-insensitively to the standard spelling, so `jakarta` and `JAKARTA` are stored as `Jakarta`.
+- Existing rows keep their current values until they are edited. An old value stays selectable in the edit form for that row.
+- These presets replace the sheet's own dropdown rule for the same columns inside the app. If those columns have a dropdown in the sheet with different options, Sheets will flag the new values there until the sheet's dropdown is updated to match.

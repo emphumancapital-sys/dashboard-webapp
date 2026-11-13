@@ -6,7 +6,7 @@ const state = {
   searchTimer: null, recordSchema: null, schemaCache: new Map(), recordToken: 0, editingRowNumber: null, currentRows: new Map(),
   organization: [], organizationLoaded: false, organizationCategory: "Department", editingOrgRow: null,
   tableSort: { org: { key: null, dir: "desc" }, users: { key: null, dir: "desc" }, pipe: { key: null, dir: "desc" } },
-  pipe: { stages: [], cards: [], statusValues: [], view: "board", loaded: false, token: 0, drag: null, move: null, detailRow: null, tab: "", statusHeader: "RFP Process" }
+  pipe: { stages: [], cards: [], statusValues: [], codes: new Set(), unsent: [], rfpTab: "RFP 2026", view: "board", loaded: false, token: 0, drag: null, move: null, detailRow: null, tab: "", statusHeader: "RFP Process" }
 };
 const PAGE_SIZES = [25, 50, 100, 200];
 
@@ -97,8 +97,9 @@ function bindEvents() {
     state.dataPage = 1; loadSourceData();
   });
   $("sourceTableBody").addEventListener("click", e => {
-    const edit = e.target.closest("[data-record-edit]"), del = e.target.closest("[data-record-delete]");
-    if (edit) openRecordModal(Number(edit.dataset.recordEdit));
+    const edit = e.target.closest("[data-record-edit]"), del = e.target.closest("[data-record-delete]"), send = e.target.closest("[data-record-send]");
+    if (send) sendRfpToPipeline(Number(send.dataset.recordSend), send.dataset.code);
+    else if (edit) openRecordModal(Number(edit.dataset.recordEdit));
     else if (del) deleteRecord(Number(del.dataset.recordDelete));
   });
   $("addRecordButton").addEventListener("click", () => openRecordModal());
@@ -279,9 +280,11 @@ async function loadSourceData(forceRefresh = false) {
   if (fresh) { $("sourceTableHead").innerHTML = ""; $("sourceTableBody").innerHTML = skeletonRows(Math.min(Math.max((source.headers || []).filter(Boolean).length, 5), 9), 12); scroll.scrollTop = 0; scroll.scrollLeft = 0; resetDataFooter("Loading…"); }
   else scroll.classList.add("is-loading");
   setRefreshing(true);
+  // The RFP table shows which requests are already in the pipeline, so make sure that list is loaded.
+  const pipeReady = source.id === "rfp-master" && !state.pipe.loaded ? loadPipeline(false, true) : null;
   try {
     const q = new URLSearchParams({ source: source.id, page: String(state.dataPage), pageSize: String(state.dataPageSize), search: $("dataSearch").value || "", dir: state.sort.dir, ...(state.sort.column !== null ? { sort: String(state.sort.column) } : {}), ...(forceRefresh ? { refresh: "1" } : {}) });
-    const data = await api(`/.netlify/functions/data?${q}`);
+    const data = await api(`/.netlify/functions/data?${q}`); if (pipeReady) await pipeReady;
     if (token !== state.dataToken) return;
     if (data.needsAttention) { source.status = "needs_attention"; source.schemaMessage = data.message; loadSourceData(); return; }
     state.dataTotalPages = data.totalPages || 1; state.dataPage = data.page || 1; state.dataTotal = Number(data.total || 0);
@@ -293,9 +296,11 @@ async function loadSourceData(forceRefresh = false) {
     state.currentRows = new Map();
     data.rows.forEach((row, i) => { const full = []; indexes.forEach((columnIndex, j) => full[columnIndex] = row[j]); state.currentRows.set(Number(data.rowNumbers?.[i]), full); });
     const searching = !!$("dataSearch").value.trim();
+    const codeAt = source.id === "rfp-master" && state.pipe.loaded ? data.headers.findIndex(h => h.trim().toLowerCase() === "rfp code") : -1;
+    const sendCell = (row, rowNumber) => { if (codeAt < 0) return ""; const code = String(row[codeAt] ?? "").trim(); if (!code) return ""; return state.pipe.codes.has(code) ? `<span class="row-flag" title="Already in the hiring pipeline" aria-label="Already in the hiring pipeline">${svgIcon("check-circle", 14)}</span>` : `<button type="button" class="row-action good" data-record-send="${rowNumber}" data-code="${escAttr(code)}" title="Send to pipeline" aria-label="Send ${escAttr(code)} to the hiring pipeline">${svgIcon("send", 14)}</button>`; };
     $("sourceTableBody").innerHTML = data.rows.length ? data.rows.map((row, i) => {
       const rowNumber = Number(data.rowNumbers?.[i]);
-      return `<tr data-row-number="${rowNumber}">${row.map(value => `<td title="${escAttr(formatCell(value))}">${cellHtml(value)}</td>`).join("")}${canEdit ? `<td class="record-actions"><div class="row-actions"><button type="button" class="row-action" data-record-edit="${rowNumber}" title="Edit record" aria-label="Edit record in row ${rowNumber}">${svgIcon("pencil", 14)}</button>${canDelete ? `<button type="button" class="row-action danger" data-record-delete="${rowNumber}" title="Delete record" aria-label="Delete record in row ${rowNumber}">${svgIcon("trash", 14)}</button>` : ""}</div></td>` : ""}</tr>`;
+      return `<tr data-row-number="${rowNumber}">${row.map(value => `<td title="${escAttr(formatCell(value))}">${cellHtml(value)}</td>`).join("")}${canEdit ? `<td class="record-actions"><div class="row-actions">${sendCell(row, rowNumber)}<button type="button" class="row-action" data-record-edit="${rowNumber}" title="Edit record" aria-label="Edit record in row ${rowNumber}">${svgIcon("pencil", 14)}</button>${canDelete ? `<button type="button" class="row-action danger" data-record-delete="${rowNumber}" title="Delete record" aria-label="Delete record in row ${rowNumber}">${svgIcon("trash", 14)}</button>` : ""}</div></td>` : ""}</tr>`;
     }).join("") : `<tr><td class="empty-cell" colspan="${Math.max(data.headers.length + (canEdit ? 1 : 0), 1)}">${searching ? emptyBlock("search", "No matching records", `Nothing in this sheet matches “${$("dataSearch").value.trim()}”.`) : emptyBlock("inbox", "No records yet", canEdit ? "Use Add Record to create the first one." : "This tab has no data rows.")}</td></tr>`;
     scroll.classList.toggle("has-actions", canEdit);
     const first = state.dataTotal ? (state.dataPage - 1) * (data.pageSize || state.dataPageSize) + 1 : 0, last = first ? first + data.rows.length - 1 : 0;
@@ -348,9 +353,10 @@ async function openRecordModal(rowNumber = null) {
       else if (/link|url/i.test(label)) type = "url";
       const id = `rf-${c.index}`, required = !!(opts.length && validation.strict);
       let control = "";
+      if (c.fixedValue !== undefined) { const shown = rowNumber && value !== "" ? value : c.fixedValue; return `<div class="field" data-field="${c.index}" data-label="${escAttr(label)}"><label class="field-label" for="${id}">${esc(label)}</label><input id="${id}" name="${c.index}" value="${escAttr(shown)}" disabled><small class="field-help">${svgIcon("lock", 10)}Fixed at ${esc(c.fixedValue)} for now: one RFP is one person.</small></div>`; }
       if (opts.length) {
         const all = value !== "" && !opts.some(o => String(o) === String(value)) ? [value, ...opts] : opts;
-        control = `<select id="${id}" name="${c.index}" data-placeholder="Select ${escAttr(label.toLowerCase())}" ${required ? "data-required" : ""}><option value=""></option>${all.map(o => `<option value="${escAttr(o)}" ${String(value) === String(o) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+        control = `<select id="${id}" name="${c.index}" data-placeholder="Select ${escAttr(label.toLowerCase())}" ${required ? "data-required" : ""} ${c.allowCustom ? "data-allow-custom" : ""}><option value=""></option>${all.map(o => `<option value="${escAttr(o)}" ${String(value) === String(o) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
       }
       else if (type === "checkbox") return `<div class="field field-full" data-field="${c.index}" data-label="${escAttr(label)}"><label class="switch-field"><input type="checkbox" name="${c.index}" ${String(value).toLowerCase() === "true" || value === true ? "checked" : ""}><i class="switch"></i><span>${esc(label)}</span></label></div>`;
       else if (type === "date") control = dateFieldHtml(c.index, toDateInput(value, meta.dateOrder), id);
@@ -515,6 +521,7 @@ function bindPipeline() {
   $("pipeSearch").addEventListener("input", () => { $("pipeSearchClear").hidden = !$("pipeSearch").value; renderPipeline(); });
   $("pipeSearchClear").addEventListener("click", () => { $("pipeSearch").value = ""; $("pipeSearchClear").hidden = true; renderPipeline(); $("pipeSearch").focus(); });
   $("pipeBU").addEventListener("change", renderPipeline);
+  $("pipeUnsent").addEventListener("click", () => openUnsentList($("pipeUnsent")));
   bindLocalSort("pipeHead", "pipe", renderPipeline);
   board.addEventListener("click", e => {
     const cardEl = e.target.closest(".k-card"); if (!cardEl) return; const rowNumber = Number(cardEl.dataset.row);
@@ -552,7 +559,7 @@ async function loadPipeline(forceRefresh = false, quiet = false) {
   try {
     const d = await api(`${PIPE_API}${forceRefresh ? "?refresh=1" : ""}`);
     if (token !== p.token) return;
-    p.stages = d.stages || []; p.cards = (d.cards || []).map(pipeDecorate); p.statusValues = d.statusValues || []; p.tab = d.tab || ""; p.statusHeader = d.statusHeader || "RFP Process"; p.loaded = true;
+    p.stages = d.stages || []; p.cards = (d.cards || []).map(pipeDecorate); p.statusValues = d.statusValues || []; p.codes = new Set(d.codes || []); p.unsent = d.unsent || []; p.rfpTab = d.rfpTab || p.rfpTab; p.tab = d.tab || ""; p.statusHeader = d.statusHeader || "RFP Process"; p.loaded = true;
     $("pipeError").hidden = true; $("pipeSubtitle").textContent = `Ongoing requests from ${p.tab}, stage by stage.`;
     $("pipeUpdated").textContent = `Updated ${new Date(d.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     const units = [...new Set(p.cards.map(c => c.businessUnit).filter(Boolean))].sort((a, b) => a.localeCompare(b)), select = $("pipeBU"), keep = select.value;
@@ -570,6 +577,7 @@ function renderPipeline() {
   $("pipeOngoingCount").textContent = p.cards.filter(c => c.group === "ongoing").length; $("pipeCompletedCount").textContent = p.cards.filter(c => c.group === "completed").length;
   $("pipeView").querySelectorAll("[data-view]").forEach(b => { const on = b.dataset.view === p.view; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); });
   board.hidden = !isBoard; $("pipeCompleted").hidden = isBoard;
+  const waiting = p.unsent.length; $("pipeUnsent").hidden = !waiting; $("pipeUnsent").innerHTML = `${svgIcon("send", 13)}<b>${waiting}</b> RFP${waiting === 1 ? "" : "s"} not in pipeline`;
   const list = pipeFiltered(isBoard ? "ongoing" : "completed"), filtering = !!($("pipeSearch").value.trim() || $("pipeBU").value);
   $("pipeCount").textContent = `${list.length.toLocaleString()} ${filtering ? (list.length === 1 ? "match" : "matches") : (list.length === 1 ? "request" : "requests")}`;
   if (!isBoard) { renderPipeCompleted(list, filtering); return; }
@@ -633,6 +641,26 @@ function requestMove(rowNumber, targetKey) {
   if (!back) { $("moveLabel").textContent = `${target.label} date`; $("moveDateSlot").innerHTML = dateFieldHtml("moveDate", card.stages[target.key]?.iso || isoOf(new Date()), "moveDateTrigger"); syncDateField($("moveDateSlot").firstElementChild); }
   $("moveOk").textContent = back ? "Move back" : "Move"; $("moveOk").className = check.cleared.length ? "danger-button" : "primary-button";
   openModal("moveModal", $("moveOk"));
+}
+function openUnsentList(button) {
+  if (Pop.current?.anchor === button) { Pop.close(); return; }
+  const panel = document.createElement("div"); panel.className = "select-pop unsent-pop"; panel.tabIndex = -1;
+  panel.innerHTML = `<div class="pop-title">In ${esc(state.pipe.rfpTab)} but not yet in the pipeline</div><div class="pop-list">${state.pipe.unsent.map(r => `<div class="unsent-row"><div><b>${esc(r.code)}</b><small>${esc([r.position, r.businessUnit].filter(Boolean).join(" · ") || "—")}</small></div><button type="button" class="k-next" data-send="${r.rowNumber}" data-code="${escAttr(r.code)}">${svgIcon("send", 12)}Send</button></div>`).join("")}</div>`;
+  panel.addEventListener("click", e => { const b = e.target.closest("[data-send]"); if (!b) return; Pop.close(); sendRfpToPipeline(Number(b.dataset.send), b.dataset.code); });
+  Pop.open(button, panel); (panel.querySelector("[data-send]") || panel).focus({ preventScroll: true });
+}
+async function sendRfpToPipeline(rfpRowNumber, code) {
+  const p = state.pipe;
+  const ok = await confirmDialog({ title: `Send ${code} to the pipeline?`, message: `This adds one row to ${p.tab || "the pipeline tab"} with this RFP's details and sets ${p.statusHeader} to ongoing. It then appears on the Hiring Pipeline board under Sourcing.`, confirmLabel: "Send to pipeline", icon: "send" });
+  if (!ok) return;
+  setRefreshing(true);
+  try {
+    await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "send", rfpRowNumber, code }) });
+    p.codes.add(code); p.unsent = p.unsent.filter(r => r.code !== code); toast(`${code} sent to the pipeline.`, "success");
+    await loadPipeline(true, true);
+    if ($("page-data").classList.contains("active") && state.activeSource?.id === "rfp-master") loadSourceData(true);
+  } catch (error) { toast(error.message, "error", { duration: 9000 }); if (/already in/i.test(error.message)) loadPipeline(true, true); }
+  finally { setRefreshing(false); }
 }
 function closeMoveDialog() { closeModal("moveModal"); state.pipe.move = null; }
 function applyStageValues(card, values) {
@@ -790,16 +818,20 @@ function syncSelect(select) {
 }
 function openSelect(select) {
   const button = select._trigger; if (Pop.current?.anchor === button) { Pop.close(); return; }
-  const options = [...select.options].filter(o => o.value !== ""), searchable = options.length > 7, clearable = !select.hasAttribute("data-required") && [...select.options].some(o => o.value === "") && select.value !== "";
+  const allowCustom = select.hasAttribute("data-allow-custom"); let custom = "";
+  const titleCase = v => v.trim().replace(/\s+/g, " ").toLowerCase().replace(/(^|[\s\-/(])([a-z\u00c0-\u024f])/g, (m, a, b) => a + b.toUpperCase());
+  const options = [...select.options].filter(o => o.value !== ""), searchable = allowCustom || options.length > 7, clearable = !select.hasAttribute("data-required") && [...select.options].some(o => o.value === "") && select.value !== "";
   const panel = document.createElement("div"); panel.className = "select-pop"; panel.tabIndex = -1;
-  panel.innerHTML = `${searchable ? `<div class="pop-search">${svgIcon("search", 14)}<input type="text" placeholder="Search…" autocomplete="off" aria-label="Search options"></div>` : ""}<div class="pop-list" role="listbox"></div>${clearable ? `<button type="button" class="pop-clear">${svgIcon("x", 12)}Clear selection</button>` : ""}`;
+  panel.innerHTML = `${searchable ? `<div class="pop-search">${svgIcon("search", 14)}<input type="text" placeholder="${allowCustom ? "Search or type a new one…" : "Search…"}" autocomplete="off" aria-label="Search options"></div>` : ""}<div class="pop-list" role="listbox"></div>${clearable ? `<button type="button" class="pop-clear">${svgIcon("x", 12)}Clear selection</button>` : ""}`;
   const list = panel.querySelector(".pop-list"), search = panel.querySelector("input"); let active = Math.max(0, options.findIndex(o => o.value === select.value)), visible = options;
   const draw = () => {
     const q = (search?.value || "").toLowerCase().trim(); visible = q ? options.filter(o => o.textContent.toLowerCase().includes(q)) : options; active = Math.min(active, Math.max(visible.length - 1, 0));
-    list.innerHTML = visible.length ? visible.map((o, i) => `<button type="button" tabindex="-1" role="option" class="pop-option${o.value === select.value ? " is-selected" : ""}${i === active ? " is-active" : ""}" aria-selected="${o.value === select.value}" data-index="${i}"><span>${esc(o.textContent)}</span>${o.value === select.value ? svgIcon("check", 14) : ""}</button>`).join("") : `<div class="pop-empty">No options match</div>`;
+    const typed = allowCustom ? titleCase(search?.value || "") : ""; custom = typed && !options.some(o => o.value.toLowerCase() === typed.toLowerCase()) ? typed : "";
+    if (custom) visible = [...visible, { value: custom, textContent: `Use “${custom}”`, isCustom: true }];
+    list.innerHTML = visible.length ? visible.map((o, i) => `<button type="button" tabindex="-1" role="option" class="pop-option${o.value === select.value ? " is-selected" : ""}${i === active ? " is-active" : ""}${o.isCustom ? " is-custom" : ""}" aria-selected="${o.value === select.value}" data-index="${i}"><span>${esc(o.textContent)}</span>${o.value === select.value ? svgIcon("check", 14) : ""}</button>`).join("") : `<div class="pop-empty">No options match</div>`;
     list.querySelector(".is-active")?.scrollIntoView({ block: "nearest" });
   };
-  const choose = value => { select.value = value; syncSelect(select); select.dispatchEvent(new Event("change", { bubbles: true })); Pop.close(true); };
+  const choose = value => { if (value && ![...select.options].some(o => o.value === value)) select.add(new Option(value, value)); select.value = value; syncSelect(select); select.dispatchEvent(new Event("change", { bubbles: true })); Pop.close(true); };
   const move = step => { if (!visible.length) return; active = (active + step + visible.length) % visible.length; list.querySelectorAll(".pop-option").forEach((el, i) => el.classList.toggle("is-active", i === active)); list.querySelector(".is-active")?.scrollIntoView({ block: "nearest" }); };
   list.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (b) choose(visible[Number(b.dataset.index)].value); });
   list.addEventListener("mousemove", e => { const b = e.target.closest(".pop-option"); if (b && Number(b.dataset.index) !== active) { active = Number(b.dataset.index); list.querySelectorAll(".pop-option").forEach((el, i) => el.classList.toggle("is-active", i === active)); } });
@@ -934,6 +966,7 @@ const ICONS = {
   "ban": `<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>`,
   "pencil": `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>`,
   "trash": `<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>`,
+  "send": `<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`,
   "more": `<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>`,
   "undo": `<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>`,
   "clock": `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`,

@@ -109,6 +109,7 @@
           <div class="segmented" id="pipeView" role="tablist"><button type="button" role="tab" class="active" data-view="board" aria-selected="true">Ongoing <i id="pipeOngoingCount">0</i></button><button type="button" role="tab" data-view="completed" aria-selected="false">Completed <i id="pipeCompletedCount">0</i></button></div>
           <div class="search-box"><span data-icon="search"></span><input id="pipeSearch" placeholder="Search position, RFP code, candidate…" autocomplete="off" aria-label="Search requests"><button type="button" class="search-clear" id="pipeSearchClear" aria-label="Clear search" title="Clear search" hidden><span data-icon="x"></span></button></div>
           <div class="toolbar-select"><select id="pipeBU" aria-label="Filter by business unit" data-placeholder="All business units"><option value="">All business units</option></select></div>
+          <button type="button" class="unsent-chip" id="pipeUnsent" aria-haspopup="dialog" hidden></button>
           <span class="toolbar-spacer"></span>
           <span class="record-count" id="pipeCount">—</span>
         </div>

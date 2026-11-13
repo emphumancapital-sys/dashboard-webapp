@@ -1,12 +1,16 @@
 import { json, bodyOf } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
-import { readManyTabsFromSpreadsheet, getSheetRowFormulas, getSheetCrudMetadata, writeSheetValues, clearSheetValues, addActivity, inferColumnMeta, toIsoDate } from "./_lib/sheets.mjs";
+import { readManyTabsFromSpreadsheet, getSheetRowFormulas, getSheetCrudMetadata, writeSheetValues, clearSheetValues, addActivity, inferColumnMeta, toIsoDate, ensureSheetRowExists, copyFormulaColumnsFromPrevious } from "./_lib/sheets.mjs";
 
 // Hiring Pipeline: a stage view over the recruitment pipeline tab.
 // A request's stage is the right-most stage column that holds a value, so the sheet stays the single source of truth.
 const MAIN_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2zaUJf_CW2VYk";
 const TAB = "2026 Rec Pipeline", HEADER_ROW = 1, DATA_START = 2, START = "A", END = "AI";
 const STATUS = { header:"RFP Process", fallback:"Q" };
+// Formula columns of the pipeline tab (same list as data.mjs); copied down when a row is created.
+const FORMULA_COLUMNS = ["A","B","C","R","Y","Z","AA","AB","AC","AF","AH"];
+// RFP intake tab. Its formula columns are never copied into the pipeline.
+const RFP = { tab:"RFP 2026", headerRow:1, dataStart:2, start:"A", end:"S", formulaColumns:["A","B","C","R","S"] };
 // manual = the app writes a date into the column. auto = formula columns fed by another tab; never written here.
 const STAGES = [
   { key:"first",     label:"1st Interview", mode:"manual", columns:[{ header:"1st Intv", fallback:"U" }] },
@@ -41,12 +45,61 @@ function resolveColumns(headers){
   };
 }
 async function readTab(forceRefresh){
-  const data = await readManyTabsFromSpreadsheet(MAIN_ID, [{ key:"pipeline", title:TAB, headerRow:HEADER_ROW, startColumn:START, endColumn:END }], { forceRefresh });
+  const data = await readManyTabsFromSpreadsheet(MAIN_ID, [{ key:"pipeline", title:TAB, headerRow:HEADER_ROW, startColumn:START, endColumn:END }, { key:"rfp", title:RFP.tab, headerRow:RFP.headerRow, startColumn:RFP.start, endColumn:RFP.end }], { forceRefresh });
   const values = data.get("pipeline")?.values || [];
+  const rfpValues = data.get("rfp")?.values || [], rfpHeaders = (rfpValues[0] || []).map(v => String(v ?? "").trim());
+  const rfpCol = name => rfpHeaders.findIndex(h => norm(h) === norm(name));
+  const rfpRows = rfpValues.slice(RFP.dataStart - RFP.headerRow).map((row, i) => ({ row, rowNumber: RFP.dataStart + i })).filter(r => filled(r.row[rfpCol("RFP Code")]));
   const headers = (values[0] || []).map(v => String(v ?? "").trim());
   const cols = resolveColumns(headers);
   const records = values.slice(DATA_START - HEADER_ROW).map((row, i) => ({ row, rowNumber: DATA_START + i })).filter(r => filled(r.row[cols.info.code]) || filled(r.row[cols.info.position]));
-  return { headers, cols, records };
+  return { headers, cols, records, values, rfp: { headers: rfpHeaders, rows: rfpRows, col: rfpCol } };
+}
+// Pick the spelling the sheet already uses for "ongoing"/"completed": dropdown options first, then existing rows.
+async function statusValueFor(wanted, cols, records){
+  let value = "";
+  try { const metaInfo = await getSheetCrudMetadata(MAIN_ID, TAB, HEADER_ROW, DATA_START, START, END); value = (metaInfo.columns?.[cols.status]?.validation?.options || []).map(String).find(o => statusGroup(o) === wanted) || ""; } catch { /* fall back to values already used in the column */ }
+  if (!value) { const seen = new Map(); for (const r of records) { const v = String(r.row[cols.status] ?? "").trim(); if (statusGroup(v) === wanted) seen.set(v, (seen.get(v) || 0) + 1); } value = [...seen.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ""; }
+  return value;
+}
+// Send one RFP from the intake tab into the pipeline tab as a new row.
+async function sendToPipeline(actor, body){
+  const rfpRow = Number(body.rfpRowNumber), code = String(body.code ?? "").trim();
+  if (!Number.isInteger(rfpRow) || rfpRow < RFP.dataStart || rfpRow > 10000 || !code) return json(400, { error:"Invalid RFP row." });
+  const { headers, cols, records, values, rfp } = await readTab(true);
+  const source = rfp.rows.find(r => r.rowNumber === rfpRow);
+  if (!source || String(source.row[rfp.col("RFP Code")] ?? "").trim() !== code) return json(409, { error:"This row no longer matches the RFP you selected (the sheet was changed). Refresh and try again." });
+  const existing = records.find(r => String(r.row[cols.info.code] ?? "").trim() === code);
+  if (existing) return json(409, { error:`${code} is already in ${TAB} (row ${existing.rowNumber}).`, rowNumber: existing.rowNumber });
+  const ongoing = await statusValueFor("ongoing", cols, records);
+  if (cols.status > -1 && !ongoing) return json(422, { error:`No "ongoing" value was found in the ${STATUS.header} dropdown or in existing rows, so the app will not guess one. Set it once in the sheet and try again.` });
+  // First free row: no RFP Code and no Position.
+  let rowNumber = DATA_START; while (filled(values[rowNumber - HEADER_ROW]?.[cols.info.code]) || filled(values[rowNumber - HEADER_ROW]?.[cols.info.position])) rowNumber++;
+  if (rowNumber > 10000) return json(400, { error:"No free row was found in the pipeline tab." });
+  const metaInfo = await getSheetCrudMetadata(MAIN_ID, TAB, HEADER_ROW, DATA_START, START, END);
+  await ensureSheetRowExists(MAIN_ID, metaInfo.sheetId, rowNumber, START, END);
+  await copyFormulaColumnsFromPrevious(MAIN_ID, metaInfo.sheetId, TAB, DATA_START, rowNumber, FORMULA_COLUMNS);
+  const formulas = await getSheetRowFormulas(MAIN_ID, TAB, rowNumber, START, END);
+  // Copy every RFP column that has a same-named, non-formula column in the pipeline tab.
+  const rfpFormula = new Set(RFP.formulaColumns.map(colIndex)), writes = [];
+  rfp.headers.forEach((header, i) => {
+    if (!header || rfpFormula.has(i)) return; const target = headers.findIndex(h => norm(h) === norm(header));
+    if (target < 0 || target === cols.status || isFormula(formulas[target]) || FORMULA_COLUMNS.includes(colLetter(target))) return;
+    const value = String(source.row[i] ?? "").trim(); if (value) writes.push({ range:`${quoted}!${colLetter(target)}${rowNumber}`, values:[[value.startsWith("=") ? "'" + value : value]] });
+  });
+  if (cols.status > -1 && !isFormula(formulas[cols.status])) writes.push({ range:`${quoted}!${colLetter(cols.status)}${rowNumber}`, values:[[ongoing]] });
+  // If RFP Code is not a formula in the new row, carry the existing code over as text (it is never generated here).
+  if (!isFormula(formulas[cols.info.code])) writes.push({ range:`${quoted}!${colLetter(cols.info.code)}${rowNumber}`, values:[[code]] });
+  if (!writes.length) return json(400, { error:"No matching columns were found between the RFP tab and the pipeline tab." });
+  await writeSheetValues(MAIN_ID, writes);
+  // Safety check: the new row must resolve to this RFP's code. If the sheet's formula says otherwise, undo and report.
+  const after = String((await readLiveRow(rowNumber))[cols.info.code] ?? "").trim();
+  if (after !== code) {
+    await clearSheetValues(MAIN_ID, writes.map(w => w.range));
+    return json(409, { error:`Not sent. The new pipeline row (row ${rowNumber}) showed RFP Code "${after || "empty"}" instead of "${code}", so the values were removed again. The RFP Code formula in ${TAB} needs a row in a specific position; add this one in the sheet.` });
+  }
+  await logActivity(actor, code, `${code}: sent to pipeline (row ${rowNumber})`);
+  return json(201, { success:true, rowNumber, code });
 }
 async function readLiveRow(rowNumber){
   const data = await readManyTabsFromSpreadsheet(MAIN_ID, [{ key:"row", title:TAB, headerRow:rowNumber, endRow:rowNumber, startColumn:START, endColumn:END }], { forceRefresh:true });
@@ -63,7 +116,7 @@ export const handler = async event => {
     const params = event.queryStringParameters || {};
 
     if (event.httpMethod === "GET") {
-      const { cols, records } = await readTab(params.refresh === "1");
+      const { cols, records, rfp } = await readTab(params.refresh === "1");
       const width = colIndex(END) + 1;
       const meta = inferColumnMeta(records.map(r => ({ row: Array.from({ length: width }, (_, i) => r.row[i] ?? "") })), width);
       const iso = (row, index) => index < 0 ? "" : toIsoDate(row[index], meta[index]?.dateOrder);
@@ -88,13 +141,18 @@ export const handler = async event => {
       return json(200, {
         tab: TAB, statusHeader: STATUS.header,
         stages: cols.stages.map(s => ({ key:s.key, label:s.label, mode:s.mode, source:s.source || null, column: s.columns[0].index > -1 ? colLetter(s.columns[0].index) : null })),
-        cards, statusValues: [...counts.entries()].map(([value, count]) => ({ value, count, group: statusGroup(value) })).sort((a, b) => b.count - a.count),
+        cards, codes: records.map(r => text(r.row, cols.info.code)).filter(Boolean),
+        // RFPs in the intake tab that have no row in the pipeline tab yet.
+        unsent: (() => { const inPipeline = new Set(records.map(r => text(r.row, cols.info.code))); const get = (row, name) => { const i = rfp.col(name); return i < 0 ? "" : String(row[i] ?? "").trim(); }; return rfp.rows.filter(r => !inPipeline.has(get(r.row, "RFP Code"))).map(r => ({ rowNumber: r.rowNumber, code: get(r.row, "RFP Code"), position: get(r.row, "Position"), businessUnit: get(r.row, "Business Unit"), received: get(r.row, "RFP Received") })).reverse(); })(),
+        rfpTab: RFP.tab, statusValues: [...counts.entries()].map(([value, count]) => ({ value, count, group: statusGroup(value) })).sort((a, b) => b.count - a.count),
         checkedAt: new Date().toISOString()
       });
     }
 
     if (!["PATCH", "POST"].includes(event.httpMethod)) return json(405, { error:"Method not allowed" });
-    const body = bodyOf(event), rowNumber = Number(body.rowNumber), code = String(body.code ?? "").trim();
+    const body = bodyOf(event);
+    if (event.httpMethod === "POST" && body.action === "send") return await sendToPipeline(actor, body);
+    const rowNumber = Number(body.rowNumber), code = String(body.code ?? "").trim();
     if (!Number.isInteger(rowNumber) || rowNumber < DATA_START || rowNumber > 10000) return json(400, { error:"Invalid row number." });
     const { cols, records } = await readTab(false);
     // Rows are addressed by sheet row number, so confirm the row still holds the same request before touching it.
@@ -136,9 +194,7 @@ export const handler = async event => {
     if (index < 0) return json(400, { error:`Column "${STATUS.header}" was not found in ${TAB}.` });
     if (isFormula(formulas[index])) return json(409, { formulaManaged:true, error:`${STATUS.header} (column ${colLetter(index)}) is calculated by a formula in this row, so it updates by itself and cannot be set from here.` });
     if (statusGroup(liveStatus) === wanted) return json(200, { success:true, rowNumber, value: liveStatus, unchanged:true });
-    let value = "";
-    try { const metaInfo = await getSheetCrudMetadata(MAIN_ID, TAB, HEADER_ROW, DATA_START, START, END); value = (metaInfo.columns?.[index]?.validation?.options || []).map(String).find(o => statusGroup(o) === wanted) || ""; } catch { /* fall back to values already used in the column */ }
-    if (!value) { const seen = new Map(); for (const r of records) { const v = String(r.row[index] ?? "").trim(); if (statusGroup(v) === wanted) seen.set(v, (seen.get(v) || 0) + 1); } value = [...seen.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ""; }
+    const value = await statusValueFor(wanted, cols, records);
     if (!value) return json(422, { error:`No "${wanted}" value was found in the ${STATUS.header} dropdown or in existing rows, so the app will not guess one. Set it once in the sheet and try again.` });
     await writeSheetValues(MAIN_ID, [{ range:`${quoted}!${colLetter(index)}${rowNumber}`, values:[[value]] }]);
     await logActivity(actor, code, `${code}: ${STATUS.header} set to ${value}`);

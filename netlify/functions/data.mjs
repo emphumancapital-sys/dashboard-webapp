@@ -1,5 +1,6 @@
 import { json } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
+import { presetFor, presetOptions, normalizePresetValue } from "./_lib/presets.mjs";
 import { readTabFromSpreadsheet, readManyTabsFromSpreadsheet, getSheetTitles, getSheetCrudMetadata, getSheetRowFormulas, writeSheetValues, clearSheetValues, addActivity, copyFormulaColumnsFromPrevious, ensureSheetRowExists } from "./_lib/sheets.mjs";
 
 const MAIN_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2zaUJf_CW2VYk";
@@ -7,8 +8,8 @@ const MAIN_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2
 // Source map rebuilt from the uploaded Recruitment Pipeline.xlsx workbook.
 // Header/data row positions and ranges are intentionally explicit per tab.
 const SOURCES = [
-  { id:"rfp-master", label:"Request for Personnel", group:"Recruitment & Staffing", tab:"RFP 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"S", identityColumns:[0,5], formulaColumns:["A","B","C","R","S"], accessMode:"crud_candidate" },
-  { id:"rfp-pipeline", label:"Recruitment Pipeline", group:"Recruitment & Staffing", tab:"2026 Rec Pipeline", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"AI", identityColumns:[0,5], formulaColumns:["A","B","C","R","Y","Z","AA","AB","AC","AF","AH"], accessMode:"crud_candidate" },
+  { id:"rfp-master", label:"Request for Personnel", group:"Recruitment & Staffing", tab:"RFP 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"S", identityColumns:[0,5], formulaColumns:["A","B","C","R","S"], accessMode:"crud_candidate", presets:true },
+  { id:"rfp-pipeline", label:"Recruitment Pipeline", group:"Recruitment & Staffing", tab:"2026 Rec Pipeline", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"AI", identityColumns:[0,5], formulaColumns:["A","B","C","R","Y","Z","AA","AB","AC","AF","AH"], accessMode:"crud_candidate", presets:true },
   { id:"spk", label:"Psychotest (SPK)", group:"Recruitment & Staffing", tab:"SPK 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[2,4], formulaColumns:["A","D"], accessMode:"crud_candidate" },
   { id:"mcu", label:"Medical Check Up (MCU)", group:"Recruitment & Staffing", tab:"MCU 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"Q", identityColumns:[3], formulaColumns:["A","F","J","O"], accessMode:"crud_candidate" },
   { id:"mcu-induction", label:"MCU Induction", group:"Recruitment & Staffing", tab:"MCU Induction 2026", headerRow:1, dataStartRow:2, startColumn:"A", endColumn:"H", identityColumns:[0,1,2,3,4,5,6,7], accessMode:"partial_crud", writableColumns:["A"], importedColumns:["B","C","D","E","F","G","H"], note:"Only RFP Received (column A) is editable. Columns B:H are populated through IMPORTRANGE and must remain read-only." },
@@ -59,6 +60,26 @@ async function findNextRow(source){
   }
   throw new Error("No empty row found in the first 2,000 data rows. Please extend the sheet capacity or contact an administrator.");
 }
+// Presets (fixed choices / fixed values) for the RFP tabs. Returns Map<columnIndex,{preset,options}>.
+async function loadPresets(source, columns){
+  const map=new Map(); if(!source.presets)return map;
+  const targets=columns.map((c,i)=>({i,preset:presetFor(c.header)})).filter(x=>x.preset);
+  if(!targets.length)return map;
+  let rows=[];
+  if(targets.some(x=>x.preset.mergeExisting)){
+    try{const data=await readManyTabsFromSpreadsheet(MAIN_ID,[{key:"t",title:source.tab,headerRow:source.headerRow,startColumn:source.startColumn,endColumn:source.endColumn}]);rows=(data.get("t")?.values||[]).slice(source.dataStartRow-source.headerRow);}catch{rows=[];}
+  }
+  for(const {i,preset} of targets)map.set(i,{preset,options:presetOptions(preset,rows.map(r=>r[i]))});
+  return map;
+}
+// Normalises preset fields in place and enforces fixed values. Runs before the generic checks.
+function applyPresetValues(payload, columns, presets, isCreate, rowFormulas){
+  for(const [index,{preset,options}] of presets){
+    const key=String(index), formula=rowFormulas[index]&&String(rowFormulas[index]).startsWith("=");
+    if(preset.fixed!==undefined){ if(isCreate&&!formula)payload[key]=preset.fixed; else if(key in payload&&String(payload[key])!==preset.fixed)throw new Error(`${columns[index]?.header||"This field"} is fixed at ${preset.fixed} for now.`); continue; }
+    if(key in payload)payload[key]=normalizePresetValue(preset,payload[key],options,columns[index]?.header||"this field");
+  }
+}
 function validateWritable(source, payload, columns, rowFormulas){
   const keys=Object.keys(payload||{});
   if(!keys.length)throw new Error("No fields were submitted.");
@@ -70,7 +91,7 @@ function validateWritable(source, payload, columns, rowFormulas){
     if(source.accessMode==="partial_crud" && !(source.writableColumns||[]).includes(letter))throw new Error(`Column ${letter} is read-only for this source.`);
     if((source.formulaColumns||[]).includes(letter) || (rowFormulas[index] && String(rowFormulas[index]).startsWith("=")))throw new Error(`Column ${letter} (${columns[index]?.header||"field"}) contains a formula or is formula-managed and cannot be edited.`);
     const column=columns[index]||{}, value=payload[key], label=String(column.header||"");
-    if(column.validation?.strict && column.validation.options?.length && value!=="" && !column.validation.options.some(option=>String(option)===String(value)))throw new Error(`Invalid option for ${label}. Please choose a value from the dropdown.`);
+    if(!column.preset && column.validation?.strict && column.validation.options?.length && value!=="" && !column.validation.options.some(option=>String(option)===String(value)))throw new Error(`Invalid option for ${label}. Please choose a value from the dropdown.`);
     if(/link|url/i.test(label) && value!=="" && !/^https?:\/\/[^\s]+$/i.test(String(value)))throw new Error(`${label} must be a valid HTTP or HTTPS URL.`);
     if(column.validation?.type==="DATE_IS_VALID" && value!=="" && Number.isNaN(Date.parse(String(value))))throw new Error(`${label} must be a valid date.`);
   }
@@ -107,7 +128,8 @@ export const handler = async event => {
       const meta=await getSheetCrudMetadata(MAIN_ID,source.tab,source.headerRow,source.dataStartRow,source.startColumn,source.endColumn);
       const templateRow=source.dataStartRow;
       const formulas=await getSheetRowFormulas(MAIN_ID,source.tab,templateRow,source.startColumn,source.endColumn);
-      const columns=meta.columns.map((c,i)=>{const isFormula=(source.formulaColumns||[]).includes(colLetter(i))||(formulas[i]&&String(formulas[i]).startsWith("="));return {...c,formula:!!isFormula,editable:source.accessMode!=="view_only" && (source.accessMode!=="partial_crud" || source.writableColumns.includes(colLetter(i))) && !isFormula};});
+      const presets=await loadPresets(source,meta.columns);
+      const columns=meta.columns.map((c,i)=>{const isFormula=(source.formulaColumns||[]).includes(colLetter(i))||(formulas[i]&&String(formulas[i]).startsWith("="));return {...c,formula:!!isFormula,editable:source.accessMode!=="view_only" && (source.accessMode!=="partial_crud" || source.writableColumns.includes(colLetter(i))) && !isFormula};}).map((c,i)=>{const p=presets.get(i);if(!p)return c;return p.preset.fixed!==undefined?{...c,fixedValue:p.preset.fixed}:{...c,validation:{type:"PRESET",options:p.options,strict:false},allowCustom:!!p.preset.allowCustom};});
       return json(200,{source:publicSource(source),columns,canCreate:source.accessMode!=="view_only",canUpdate:source.accessMode!=="view_only",canDelete:source.accessMode==="crud_candidate",checkedAt:new Date().toISOString()});
     }
 
@@ -120,10 +142,13 @@ export const handler = async event => {
     if(source.accessMode==="view_only")return json(403,{error:"This source is view-only."});
     const body=JSON.parse(event.body||"{}");
     const meta=await getSheetCrudMetadata(MAIN_ID,source.tab,source.headerRow,source.dataStartRow,source.startColumn,source.endColumn);
+    const presets=await loadPresets(source,meta.columns);
+    for(const index of presets.keys())meta.columns[index]={...meta.columns[index],preset:true};
     if(event.httpMethod==="POST"){
       const rowNumber=await findNextRow(source);
       await ensureSheetRowExists(MAIN_ID,meta.sheetId,rowNumber,source.startColumn,source.endColumn);
       const formulas=await getSheetRowFormulas(MAIN_ID,source.tab,rowNumber,source.startColumn,source.endColumn);
+      body.values=body.values||{};applyPresetValues(body.values,meta.columns,presets,true,formulas);
       validateWritable(source,body.values,meta.columns,formulas);
       if(source.accessMode==="crud_candidate"){
         await copyFormulaColumnsFromPrevious(MAIN_ID,meta.sheetId,source.tab,source.dataStartRow,rowNumber,source.formulaColumns||[]);
@@ -137,6 +162,7 @@ export const handler = async event => {
     if(!Number.isInteger(rowNumber)||rowNumber<source.dataStartRow||rowNumber>10000)return json(400,{error:"Invalid row number."});
     const formulas=await getSheetRowFormulas(MAIN_ID,source.tab,rowNumber,source.startColumn,source.endColumn);
     if(event.httpMethod==="PATCH"){
+      body.values=body.values||{};applyPresetValues(body.values,meta.columns,presets,false,formulas);
       validateWritable(source,body.values,meta.columns,formulas);
       const data=Object.entries(body.values).map(([key,value])=>({range:`${quoteTab(source.tab)}!${colLetter(Number(key))}${rowNumber}`,values:[[safeValue(value)]]}));
       await writeSheetValues(MAIN_ID,data);
