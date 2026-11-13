@@ -98,12 +98,20 @@ export const handler = async event => {
     // Request only formulas and validation metadata. Literal cell contents (including employee data)
     // are deliberately excluded from the audit export.
     auditStage = "grid metadata and formula scan";
-    const gridResponse = ranges.length ? await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
-      ranges,
-      includeGridData: true,
-      fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowMetadata(hiddenByUser),columnMetadata(hiddenByUser),rowData(values(userEnteredValue(userEnteredFormula),dataValidation))))"
-    }) : { data: { sheets: [] } };
+    auditStage = "grid metadata and formula scan";
+    const gridSheets = [];
+    for (let index = 0; index < sheetMeta.length; index++) {
+      const meta = sheetMeta[index];
+      const range = ranges[index];
+      const response = await sheets.spreadsheets.get({
+        spreadsheetId: SPREADSHEET_ID,
+        ranges: [range],
+        includeGridData: true,
+        fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(userEnteredValue,dataValidation))))"
+      });
+      gridSheets.push(...(response.data.sheets || []));
+    }
+    const gridResponse = { data: { sheets: gridSheets } };
 
     const tabAudits = [];
     const validationSourceRanges = new Set();
@@ -169,8 +177,6 @@ export const handler = async event => {
         hidden: Boolean(meta?.hidden),
         grid: meta?.grid || null,
         scannedGrid: { rows: rowLimit, columns: colLimit },
-        hiddenRows: [...hiddenRows].sort((a,b) => a-b),
-        hiddenColumns: [...hiddenColumns],
         validationCellCount,
         validations: [...validationMap.values()],
         formulaCount,
