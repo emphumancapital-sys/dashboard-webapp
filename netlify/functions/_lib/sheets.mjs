@@ -228,8 +228,7 @@ export async function readTabFromSpreadsheet(spreadsheetId,title,headerRow=1,dat
   }
   const values=raw.values||[];
   const offset=Math.max(0,dataStartRow-headerRow);
-  const indexedRows=values.slice(offset).map((row,index)=>({row,sheetRow:dataStartRow+index})).filter(item=>rangeOptions.identityColumns?.length ? rangeOptions.identityColumns.some(index=>item.row[index]!==undefined&&item.row[index]!==null&&item.row[index]!=="") : item.row.some(value=>value!==""&&value!==null&&value!==undefined));
-  const candidateRows=indexedRows.map(item=>item.row);
+  const candidateRows=values.slice(offset).filter(row=>rangeOptions.identityColumns?.length ? rangeOptions.identityColumns.some(index=>row[index]!==undefined&&row[index]!==null&&row[index]!=="") : row.some(value=>value!==""&&value!==null&&value!==undefined));
   const width=Math.max(raw.headers.length,...candidateRows.map(row=>row.length),0);
   const keep=[];
   for(let i=0;i<width;i++){
@@ -238,76 +237,13 @@ export async function readTabFromSpreadsheet(spreadsheetId,title,headerRow=1,dat
     if(header||hasData)keep.push(i);
   }
   const headers=keep.map(i=>String(raw.headers[i]??"").trim()||`Column ${i+1}`);
-  let indexed=candidateRows.map((row,index)=>({row:keep.map(i=>row[i]??""),sheetRow:indexedRows[index].sheetRow}));
+  let rows=candidateRows.map(row=>keep.map(i=>row[i]??""));
   const q=String(search||"").trim().toLocaleLowerCase();
-  if(q)indexed=indexed.filter(item=>item.row.some(value=>String(value??"").toLocaleLowerCase().includes(q)));
-  const total=indexed.length;
+  if(q)rows=rows.filter(row=>row.some(value=>String(value??"").toLocaleLowerCase().includes(q)));
+  const total=rows.length;
   const safeSize=Math.min(200,Math.max(10,Number(pageSize)||50));
   const totalPages=Math.max(1,Math.ceil(total/safeSize));
   const safePage=Math.min(totalPages,Math.max(1,Number(page)||1));
   const start=(safePage-1)*safeSize;
-  const pageRows=indexed.slice(start,start+safeSize);
-  return {headers,rows:pageRows.map(item=>item.row),rowNumbers:pageRows.map(item=>item.sheetRow),total,page:safePage,pageSize:safeSize,totalPages,headerRow,dataStartRow,lastDataRow:indexedRows.length?indexedRows[indexedRows.length-1].sheetRow:dataStartRow-1,cacheTtlSeconds:READ_CACHE_TTL_MS/1000};
+  return {headers,rows:rows.slice(start,start+safeSize),total,page:safePage,pageSize:safeSize,totalPages,headerRow,dataStartRow,cacheTtlSeconds:READ_CACHE_TTL_MS/1000};
 }
-
-// Spreadsheet write helpers. All mutations are restricted by the data endpoint allowlist.
-export async function mutateTab(spreadsheetId, title, operation, payload) {
-  const client=await api();
-  const metadata=await client.spreadsheets.get({spreadsheetId,fields:"sheets.properties"});
-  const sheet=(metadata.data.sheets||[]).find(item=>item.properties?.title===title);
-  if(!sheet)throw new Error(`Sheet "${title}" was not found.`);
-  const sheetId=sheet.properties.sheetId;
-  const rowNumber=Number(payload.rowNumber||0);
-  const editableColumns=[...new Set((payload.editableColumns||[]).map(Number))].filter(n=>Number.isInteger(n)&&n>=0&&n<200);
-  if(!editableColumns.length)throw new Error("No editable columns are configured.");
-  const colLetter=n=>{let x=n+1,out="";while(x){const r=(x-1)%26;out=String.fromCharCode(65+r)+out;x=Math.floor((x-1)/26);}return out;};
-  const quoted=`'${String(title).replace(/'/g,"''")}'`;
-  const enteredValue=index=>{
-    const value=String(payload.values?.[index]??"");
-    const header=String(payload.headers?.[index]||"");
-    return /phone|mobile|handphone|nomor hp/i.test(header)&&/^\\+/.test(value)?"'"+value:value;
-  };
-  const invalidate=()=>{for(const key of [...readCache.keys()])if(key.startsWith(`${spreadsheetId}:`)&&key.includes(quoted))readCache.delete(key);};
-  if(operation==="update"){
-    if(rowNumber<payload.dataStartRow||rowNumber>Number(payload.lastRow||0))throw new Error("The selected row is outside the current data range. Refresh the table and try again.");
-    const data=editableColumns.map(index=>({range:`${quoted}!${colLetter(index)}${rowNumber}`,values:[[enteredValue(index)]]}));
-    await with429Retry(()=>client.spreadsheets.values.batchUpdate({spreadsheetId,valueInputOption:"USER_ENTERED",requestBody:{data}}));
-    invalidate();return {rowNumber};
-  }
-  if(operation==="delete"){
-    if(rowNumber<payload.dataStartRow||rowNumber>Number(payload.lastRow||0))throw new Error("The selected row is outside the current data range. Refresh the table and try again.");
-    await with429Retry(()=>client.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests:[{deleteDimension:{range:{sheetId,dimension:"ROWS",startIndex:rowNumber-1,endIndex:rowNumber}}}]}}));
-    invalidate();return {rowNumber};
-  }
-  if(operation==="add"){
-    const lastRow=Number(payload.lastRow||0);
-    const insertAt=Math.max(Number(payload.dataStartRow)-1,lastRow);
-    const formulaColumns=[...new Set((payload.formulaColumns||[]).map(Number))].filter(n=>Number.isInteger(n)&&n>=0);
-    const requests=[{insertDimension:{range:{sheetId,dimension:"ROWS",startIndex:insertAt,endIndex:insertAt+1},inheritFromBefore:true}}];
-    // Copy the latest existing formula per formula column, rather than copying a whole
-    // row that could duplicate stale user-entered values.
-    if(lastRow>=Number(payload.dataStartRow)&&formulaColumns.length){
-      const formulaRanges=formulaColumns.map(index=>`${quoted}!${colLetter(index)}${payload.dataStartRow}:${colLetter(index)}${lastRow}`);
-      const formulaResponse=await with429Retry(()=>client.spreadsheets.values.batchGet({spreadsheetId,ranges:formulaRanges,valueRenderOption:"FORMULA"}));
-      const valueRanges=formulaResponse.data.valueRanges||[];
-      formulaColumns.forEach((column,index)=>{
-        const cells=valueRanges[index]?.values||[];
-        let sourceRow=0;
-        for(let r=cells.length-1;r>=0;r--){
-          const value=cells[r]?.[0];
-          if(typeof value==="string"&&value.startsWith("=")){sourceRow=Number(payload.dataStartRow)+r;break;}
-        }
-        if(sourceRow){
-          requests.push({copyPaste:{source:{sheetId,startRowIndex:sourceRow-1,endRowIndex:sourceRow,startColumnIndex:column,endColumnIndex:column+1},destination:{sheetId,startRowIndex:insertAt,endRowIndex:insertAt+1,startColumnIndex:column,endColumnIndex:column+1},pasteType:"PASTE_FORMULA",pasteOrientation:"NORMAL"}});
-        }
-      });
-    }
-    await with429Retry(()=>client.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests}}));
-    const newRow=insertAt+1;
-    const data=editableColumns.map(index=>({range:`${quoted}!${colLetter(index)}${newRow}`,values:[[enteredValue(index)]]}));
-    if(data.length)await with429Retry(()=>client.spreadsheets.values.batchUpdate({spreadsheetId,valueInputOption:"USER_ENTERED",requestBody:{data}}));
-    invalidate();return {rowNumber:newRow};
-  }
-  throw new Error("Unsupported spreadsheet operation.");
-}
-
