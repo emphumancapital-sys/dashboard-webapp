@@ -33,7 +33,14 @@ function parseDate(value){
 function dateLabel(date){return date.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});}
 const CONTRACT_WINDOW_DAYS=90, CONTRACT_OVERDUE_DAYS=30, JOIN_WINDOW_DAYS=7, SCHEDULE_WINDOW_DAYS=14;
 // Dated pipeline steps shown on the Overview schedule: [sheet header, kind, label].
-const SCHEDULE_STEPS=[["1st Intv","interview","1st Interview"],["2nd Intv","interview","2nd Interview"],["Offering In","offering","Offering In"],["Offering Done","offering","Offering Done"],["Psychological Test","psikotest","Psikotest"],["MCU","mcu","MCU"]];
+const SCHEDULE_STEPS=[["1st Intv","interview","1st Interview"],["2nd Intv","interview","2nd Interview"],["Offering In","offering","Offering In"],["Offering Done","offering","Offering Done"]];
+// Psikotest and MCU dates come from their own tabs, not from the pipeline's formula columns.
+const SCHEDULE_TABS=[
+  {key:"spk",title:"SPK 2026",headerRow:1,startColumn:"A",endColumn:"Q",kind:"psikotest",label:"Psikotest",date:"TEST",name:"NAMA PESERTA",position:"POSISI",businessUnit:"B.U",code:"RFP"},
+  {key:"mcu",title:"MCU 2026",headerRow:1,startColumn:"A",endColumn:"Q",kind:"mcu",label:"MCU",date:"Tanggal MCU",name:"Nama Lengkap",position:"",businessUnit:"Business Unit",code:""}
+];
+// A date cell may carry a time ("14/11/2026 08:00"); only the date matters here.
+const dateOnly=value=>String(value??"").trim().replace(/[T\s]+\d{1,2}[:.]\d{2}.*$/,"");
 // Statuses after which Human Capital has nothing left to do for the contract.
 export const contractDone=status=>/sent\s*to\s*c\s*(&|and|n)?\s*b|resign/i.test(String(status??""));
 function countRows(rows,index){return rows.filter(row=>String(val(row,index)).trim()!=="").length;}
@@ -93,24 +100,39 @@ export const handler = async event => {
     const pipeValues=data.get("rfp")?.values||[];
     const ivCode=col(rfp.headers,"RFP Code"),ivPosition=col(rfp.headers,"Position"),ivBU=col(rfp.headers,"Business Unit"),ivCandidate=col(rfp.headers,"Candidates"),ivProcess=col(rfp.headers,"RFP Process"),ivOutcome=col(rfp.headers,"Status");
     const blank=value=>{const text=String(value??"").trim();return !text||/^(#.*|-+|—)$/.test(text);};
-    const upcomingSchedule=[];
+    const upcomingSchedule=[],scheduleWarnings=[];
     pipeValues.slice(1).forEach((row,index)=>{
       if(![0,5].some(i=>row[i]!==undefined&&row[i]!==null&&row[i]!==""))return;
       if(/fail|gagal/i.test(String(val(row,ivOutcome)))||/complet|done|closed|selesai|cancel/i.test(String(val(row,ivProcess))))return;
       for(const [header,kind,label] of SCHEDULE_STEPS){
         const date=parseDate(val(row,col(rfp.headers,header)));if(!date)continue;
         const daysUntil=Math.ceil((date-today)/86400000);if(daysUntil<0||daysUntil>SCHEDULE_WINDOW_DAYS)continue;
-        upcomingSchedule.push({rowNumber:2+index,kind,label,candidate:String(val(row,ivCandidate)||"").trim(),position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),rfpCode:String(val(row,ivCode)||""),date:dateLabel(date),weekday:date.toLocaleDateString("en-GB",{weekday:"short"}),daysUntil,
+        upcomingSchedule.push({source:"pipeline",sourceTab:"2026 Rec Pipeline",rowNumber:2+index,kind,label,candidate:String(val(row,ivCandidate)||"").trim(),position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),rfpCode:String(val(row,ivCode)||""),date:dateLabel(date),weekday:date.toLocaleDateString("en-GB",{weekday:"short"}),daysUntil,
           details:rfp.headers.map((name,i)=>({label:name,value:String(row[i]??"").trim()})).filter(item=>item.label&&!blank(item.value))});
       }
     });
-    upcomingSchedule.sort((a,b)=>a.daysUntil-b.daysUntil||SCHEDULE_STEPS.findIndex(x=>x[2]===a.label)-SCHEDULE_STEPS.findIndex(x=>x[2]===b.label)||a.position.localeCompare(b.position));
+    // Read separately so the Overview still loads if one of these tabs is missing or renamed.
+    for(const tab of SCHEDULE_TABS){
+      let values=[];
+      try{values=(await readManyTabsFromSpreadsheet(SPREADSHEET_ID,[tab],{forceRefresh:event.queryStringParameters?.refresh==="1"})).get(tab.key)?.values||[];}
+      catch(error){scheduleWarnings.push(`${tab.label} schedule unavailable (${tab.title}): ${error.message||"unknown error"}`);continue;}
+      const headers=(values[0]||[]).map(value=>String(value??"").trim()),at=name=>name?col(headers,name):-1,dateCol=at(tab.date);
+      if(dateCol<0){scheduleWarnings.push(`${tab.label} schedule unavailable: column "${tab.date}" was not found in ${tab.title}.`);continue;}
+      values.slice(1).forEach((row,index)=>{
+        const date=parseDate(dateOnly(val(row,dateCol)));if(!date)return;
+        const daysUntil=Math.ceil((date-today)/86400000);if(daysUntil<0||daysUntil>SCHEDULE_WINDOW_DAYS)return;
+        upcomingSchedule.push({source:tab.key,sourceTab:tab.title,rowNumber:tab.headerRow+1+index,kind:tab.kind,label:tab.label,candidate:String(val(row,at(tab.name))||"").trim(),position:String(val(row,at(tab.position))||"").trim()||"—",businessUnit:String(val(row,at(tab.businessUnit))||"").trim()||"—",rfpCode:String(val(row,at(tab.code))||"").trim(),date:dateLabel(date),weekday:date.toLocaleDateString("en-GB",{weekday:"short"}),daysUntil,
+          details:headers.map((name,i)=>({label:name,value:String(row[i]??"").trim()})).filter(item=>item.label&&!blank(item.value))});
+      });
+    }
+    const stepOrder=["1st Interview","2nd Interview","Offering In","Offering Done","Psikotest","MCU"];
+    upcomingSchedule.sort((a,b)=>a.daysUntil-b.daysUntil||stepOrder.indexOf(a.label)-stepOrder.indexOf(b.label)||String(a.candidate||a.position).localeCompare(String(b.candidate||b.position)));
 
     const movementReason=col(movement.headers,"REASON");
     const movementCounts={newHire:0,resignation:0,termination:0,retirement:0};
     for(const row of movement.rows){const reason=norm(val(row,movementReason));if(reason==="new hire")movementCounts.newHire++;else if(reason.includes("resign"))movementCounts.resignation++;else if(reason.includes("end of contract")||reason.includes("termination"))movementCounts.termination++;else if(reason.includes("retirement"))movementCounts.retirement++;}
 
-    let activities=[];const warnings=[];
+    let activities=[];const warnings=[...scheduleWarnings];
     try{activities=await listActivity(10);}catch(error){warnings.push(`Activity log unavailable: ${error.message||"unknown error"}`);}
     return json(200,{
       generatedAt:new Date().toISOString(),currentYear,

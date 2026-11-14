@@ -47,7 +47,11 @@ Built on the v10 build. Adds `netlify/functions/contracts.mjs`, changes `dashboa
 - The dialog has a `Sent to C&B` button and a `Mark as Resign` link for rows that still need action. Using them there does not ask for a second confirmation; the row icon still does.
 
 ## Upcoming Schedule (replaces Upcoming Interviews)
-- Source: `2026 Rec Pipeline`. Lists every dated step from today through the next 14 days: `1st Intv`, `2nd Intv`, `Offering In`, `Offering Done`, `Psychological Test` (shown as Psikotest) and `MCU`.
+- Lists every dated step from today through the next 14 days.
+- Interviews and offerings come from `2026 Rec Pipeline`: `1st Intv`, `2nd Intv`, `Offering In`, `Offering Done`.
+- Psikotest comes from `SPK 2026`, column `TEST` (name from `NAMA PESERTA`, position from `POSISI`, business unit from `B.U`).
+- MCU comes from `MCU 2026`, column `Tanggal MCU` (name from `Nama Lengkap`, business unit from `Business Unit`). A time in the cell is ignored.
+- If one of those two tabs or its date column cannot be found, the rest of the Overview still loads and a warning names what is missing.
 - Entries are grouped by day (Today, Tomorrow, In N days) and show the candidate (or the position when no candidate is filled), the step, position and business unit.
-- Rows whose `Status` is Failed or whose `RFP Process` is completed or cancelled are left out. A cell that does not hold a date is skipped.
-- Clicking an entry opens a dialog with the step, its date and every filled column of that row. "Open in Hiring Pipeline" jumps to the same request's card details on the board.
+- Pipeline rows whose `Status` is Failed or whose `RFP Process` is completed or cancelled are left out. Psikotest and MCU rows are not filtered by status. A cell that does not hold a date is skipped.
+- Clicking an entry opens a dialog with the step, its date and every filled column of that row. For pipeline entries, "Open in Hiring Pipeline" jumps to the same request's card details on the board. For Psikotest and MCU entries the button opens that tab's table, filtered to the person.

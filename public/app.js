@@ -59,7 +59,14 @@ function bindEvents() {
   bindModal("scheduleModal", closeScheduleDetail, ["closeScheduleModal", "cancelScheduleModal"]);
   $("scheduleList").addEventListener("click", e => { const b = e.target.closest("[data-schedule]"); if (b) openScheduleDetail(Number(b.dataset.schedule)); });
   // Jump from a schedule entry to the same request on the board.
-  $("scheduleOpen").addEventListener("click", () => { const rowNumber = state.scheduleRow; closeScheduleDetail(); state.pipe.openAfterLoad = rowNumber; navigate("hiring"); });
+  $("scheduleOpen").addEventListener("click", () => {
+    const item = state.scheduleItem; closeScheduleDetail(); if (!item) return;
+    if (item.source === "pipeline") { state.pipe.openAfterLoad = item.rowNumber; navigate("hiring"); return; }
+    // Psikotest and MCU live in their own tabs: open that table, filtered to this person.
+    if (!state.sources.some(x => x.id === item.source)) { toast(`${item.sourceTab} is not available in the data list.`, "warning"); return; }
+    document.getElementById("masterDataNavGroup").classList.remove("closed"); navigate("data", item.source);
+    if (item.candidate) { $("dataSearch").value = item.candidate; $("dataSearchClear").hidden = false; state.dataPage = 1; loadSourceData(); }
+  });
   $("sendForm").addEventListener("submit", submitSend);
   $("contractSent").addEventListener("click", () => setContractStatus(state.contractRow, "sent", true));
   $("contractResign").addEventListener("click", () => setContractStatus(state.contractRow, "resign", true));
@@ -236,11 +243,12 @@ function renderSchedule(d) {
   }).join("");
 }
 function openScheduleDetail(index) {
-  const r = (state.dashboard?.upcomingSchedule || [])[index]; if (!r) return; state.scheduleRow = r.rowNumber;
+  const r = (state.dashboard?.upcomingSchedule || [])[index]; if (!r) return; state.scheduleItem = r;
+  $("scheduleOpen").textContent = r.source === "spk" ? "Open in Psychotest (SPK)" : r.source === "mcu" ? "Open in Medical Check Up" : "Open in Hiring Pipeline";
   $("scheduleModalIcon").className = "modal-icon schedule-ico is-" + r.kind; $("scheduleModalIcon").innerHTML = svgIcon(SCHEDULE_ICON[r.kind] || "calendar", 17);
-  $("scheduleModalTitle").textContent = r.candidate || r.position; $("scheduleModalSub").textContent = [r.candidate ? r.position : "", r.rfpCode, `Row ${r.rowNumber}`].filter(Boolean).join(" · ");
+  $("scheduleModalTitle").textContent = r.candidate || r.position; $("scheduleModalSub").textContent = [r.candidate && r.position !== "—" ? r.position : "", r.rfpCode, `${r.sourceTab} · Row ${r.rowNumber}`].filter(Boolean).join(" · ");
   $("scheduleSummary").innerHTML = `<div><small>${esc(r.label)}</small><b>${esc(r.weekday)}, ${esc(r.date)}</b></div><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span>`;
-  $("scheduleInfo").innerHTML = (r.details || []).map(item => `<div${item.label.trim().toLowerCase() === "remarks" ? ' class="is-wide"' : ""}><dt>${esc(item.label)}</dt><dd${item.label.trim().toLowerCase() === "remarks" ? ' class="is-multiline"' : ""}>${/^https?:\/\/\S+$/i.test(item.value) ? `<a class="cell-link" href="${escAttr(item.value)}" target="_blank" rel="noopener noreferrer">${svgIcon("external-link", 12)}<span>Open link</span></a>` : esc(item.value)}</dd></div>`).join("");
+  $("scheduleInfo").innerHTML = (r.details || []).map(item => `<div${item.label.trim().toLowerCase() === "remarks" ? ' class="is-wide"' : ""}><dt>${esc(item.label === item.label.toUpperCase() ? headerLabel(item.label) : item.label)}</dt><dd${item.label.trim().toLowerCase() === "remarks" ? ' class="is-multiline"' : ""}>${/^https?:\/\/\S+$/i.test(item.value) ? `<a class="cell-link" href="${escAttr(item.value)}" target="_blank" rel="noopener noreferrer">${svgIcon("external-link", 12)}<span>Open link</span></a>` : esc(item.value)}</dd></div>`).join("");
   openModal("scheduleModal", $("cancelScheduleModal"));
 }
 function closeScheduleDetail() { closeModal("scheduleModal"); }
@@ -252,7 +260,7 @@ function openContractMenu(button, rowNumber) {
   Pop.open(button, panel); panel.querySelector(".pop-option").focus({ preventScroll: true });
 }
 const contractRemaining = r => r.daysRemaining < 0 ? `${-r.daysRemaining} day${r.daysRemaining === -1 ? "" : "s"} overdue` : r.daysRemaining === 0 ? "Today" : `In ${r.daysRemaining} day${r.daysRemaining === 1 ? "" : "s"}`;
-const KEEP_UPPER = new Set(["RFP", "MCU", "ID", "P.E", "C&B", "L"]);
+const KEEP_UPPER = new Set(["RFP", "MCU", "ID", "P.E", "C&B", "L", "SPK", "B.U"]);
 const headerLabel = text => String(text).split(/\s+/).map(w => KEEP_UPPER.has(w.toUpperCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 // Full row from Extend 2026, so the contract can be checked before its status is changed.
 function openContractDetail(rowNumber) {
