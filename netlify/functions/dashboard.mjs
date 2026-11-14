@@ -149,11 +149,18 @@ export const handler = async event => {
       const base={pipelineRow:2+index,name:candidate,position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),rfpCode:String(val(row,ivCode)||"")};
       if(requests.psikotest){
         if(key)requestByName.set(key,{...requests.psikotest,...base});
-        // The invitation form creates the SPK row; until a row with this name exists, the invitation is still to be sent.
         const answered=spkTab&&key?spkRows.filter(item=>spkAnswers(item,key,requests.psikotest)):[];
-        // Finished once the surat pengantar is complete: the row has both NO SPK and the letter link.
-        if(answered.some(item=>filled(item.row[spkCols.no])&&filled(item.row[spkCols.link])))cleanup.push({pipelineRow:base.pipelineRow,code:base.rfpCode,kind:"psikotest"});
-        if(spkTab&&!(key&&spkRows.some(item=>spkAnswers(item,key,requests.psikotest))))actions.push({kind:"invite",title:"Send psikotest invitation",...base,...requests.psikotest,daysUntil:Math.ceil((new Date(requests.psikotest.dateIso+"T00:00:00")-today)/86400000)});
+        const letter=requests.letter||null,task={...base,...requests.psikotest,daysUntil:Math.ceil((new Date(requests.psikotest.dateIso+"T00:00:00")-today)/86400000)};
+        if(answered.length){
+          // The invitation form has created the row. A letter prepared earlier is copied into it, then the notes in Remarks are removed.
+          const target=answered[answered.length-1],complete=filled(target.row[spkCols.no])&&filled(target.row[spkCols.link]);
+          if(letter&&!complete)cleanup.push({pipelineRow:base.pipelineRow,code:base.rfpCode,kind:"psikotest",sync:{rowNumber:target.rowNumber,name:String(target.row[spkCols.name]).trim(),values:{date:letter.dateIso,noSpk:letter.noSpk,location:requests.psikotest.location,link:letter.link}}});
+          else if(complete)cleanup.push({pipelineRow:base.pipelineRow,code:base.rfpCode,kind:"psikotest"});
+        }else if(spkTab){
+          // Order of work: surat pengantar first, then the invitation to the candidate.
+          if(!letter)actions.push({kind:"spk",pending:true,title:"Permintaan Surat Pengantar Psikotes",...task});
+          else actions.push({kind:"invite",title:"Send psikotest invitation",...task,letter});
+        }
       }
       // MCU is finished once the form has created the row in MCU 2026.
       if(requests.mcu&&mcuTab&&key&&mcuRows.some(item=>mcuAnswers(item,key,requests.mcu)))cleanup.push({pipelineRow:base.pipelineRow,code:base.rfpCode,kind:"mcu"});
@@ -162,6 +169,7 @@ export const handler = async event => {
     // Surat pengantar still open: an SPK row that has a participant but no NO SPK or no letter link.
     for(const {row,rowNumber} of spkRows){
       if(filled(row[spkCols.no])&&filled(row[spkCols.link]))continue;
+      if(cleanup.some(item=>item.sync&&item.sync.rowNumber===rowNumber))continue;
       const testDate=spkCols.test>-1?parseDate(dateOnly(row[spkCols.test])):null,daysUntil=testDate?Math.ceil((testDate-today)/86400000):null;
       if(daysUntil!==null&&daysUntil<-30)continue; // older rows are history, not tasks
       const name=String(row[spkCols.name]).trim(),found=requestByName.get(personKey(name)),request=found&&spkAnswers({row},personKey(name),found)?found:{};

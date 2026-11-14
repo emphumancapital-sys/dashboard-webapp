@@ -251,12 +251,28 @@ export const handler = async event => {
       // A finished Psikotest or MCU request: remove its line(s) from Remarks and keep every other line as it is.
       const kind = body.kind === "mcu" ? "MCU" : body.kind === "psikotest" ? "Psikotest" : null, index = cols.info.remarks;
       if (!kind || index < 0) return json(400, { error:"Unknown request." });
-      const lines = String(live[index] ?? "").split(/\r?\n/), kept = lines.filter(line => !line.trim().startsWith(`[${kind} `));
+      const lines = String(live[index] ?? "").split(/\r?\n/), kept = lines.filter(line => !line.trim().startsWith(`[${kind} `) && !(kind === "Psikotest" && line.trim().startsWith("[SPK ")));
       if (kept.length === lines.length) return json(200, { success:true, rowNumber, unchanged:true });
       if (isFormula(formulas[index])) return json(409, { error:"Remarks is calculated by a formula in this row." });
       const text = kept.join("\n").trim(), range = `${quoted}!${colLetter(index)}${rowNumber}`;
       if (text) await writeSheetValues(MAIN_ID, [{ range, values:[[text.startsWith("=") ? "'" + text : text]] }]); else await clearSheetValues(MAIN_ID, [range]);
       await logActivity(actor, code, `${code}: ${kind} request finished, note removed from Remarks`);
+      return json(200, { success:true, rowNumber });
+    }
+
+    if (body.action === "letter") {
+      // Surat pengantar prepared before the invitation form has created the row in SPK 2026: kept in Remarks until that row exists.
+      const date = String(body.date ?? "").trim(), noSpk = String(body.noSpk ?? "").trim().replace(/\s+/g, " "), link = String(body.link ?? "").trim(), index = cols.info.remarks;
+      if (!validIso(date)) return json(400, { error:"DATE must be a valid date." });
+      if (!noSpk || noSpk.length > 120) return json(400, { error:"Enter the NO SPK." });
+      if (!/^https?:\/\/\S+$/i.test(link)) return json(400, { error:"SPK must be a link that starts with http:// or https://" });
+      if (index < 0) return json(400, { error:`Column "Remarks" was not found in ${TAB}.` });
+      if (!parseRequests(live[index]).psikotest) return json(409, { error:"Request the psikotest for this candidate first." });
+      if (isFormula(formulas[index])) return json(409, { error:"Remarks is calculated by a formula in this row." });
+      // One letter per request: an earlier line is replaced, every other line is kept.
+      const text = [...String(live[index] ?? "").split(/\r?\n/).filter(line => line.trim() && !line.trim().startsWith("[SPK ")), requestLine("letter", { date, noSpk, link })].join("\n");
+      await writeSheetValues(MAIN_ID, [{ range:`${quoted}!${colLetter(index)}${rowNumber}`, values:[[text.startsWith("=") ? "'" + text : text]] }]);
+      await logActivity(actor, code, `${code}: surat pengantar psikotes recorded (${noSpk})`);
       return json(200, { success:true, rowNumber });
     }
 

@@ -775,9 +775,9 @@ function openStageMenu(button, rowNumber) {
   const panel = document.createElement("div"); panel.className = "select-pop stage-menu"; panel.setAttribute("role", "menu"); panel.tabIndex = -1;
   panel.innerHTML = `<div class="pop-title">Move ${esc(card.code)} to</div>` + pipeColumns().map(stage => { const check = moveCheck(card, stage.key), current = (card.stage || null) === stage.key; return `<button type="button" role="menuitem" class="pop-option${current ? " is-selected" : ""}" data-stage="${stage.key ?? ""}" ${check.ok ? "" : "disabled"} title="${escAttr(check.reason || (current ? "Current stage" : ""))}"><span>${esc(stage.label)}</span>${current ? svgIcon("check", 14) : stage.mode === "auto" ? `<em>${check.ok ? (card.requests?.[stage.key] ? "Requested" : "Request") : `${svgIcon("lock", 11)}Auto`}</em>` : ""}</button>`; }).join("");
   const pendingForms = ["psikotest", "mcu"].filter(k => card.requests?.[k] && !card.stages[k]?.reached);
-  if (pendingForms.length) panel.insertAdjacentHTML("beforeend", `<div class="pop-sep"></div>${pendingForms.map(k => `<button type="button" role="menuitem" class="pop-option" data-form="${k}"><span>${k === "mcu" ? "Open MCU form…" : "Open psikotest invitation…"}</span></button>`).join("")}`);
+  if (pendingForms.length) panel.insertAdjacentHTML("beforeend", `<div class="pop-sep"></div>${pendingForms.map(k => `<button type="button" role="menuitem" class="pop-option" data-form="${k === "mcu" ? "mcu" : card.requests?.letter ? "invite" : "spk"}"><span>${k === "mcu" ? "Open MCU form…" : card.requests?.letter ? "Send psikotest invitation…" : "Fill surat pengantar psikotes…"}</span></button>`).join("")}`);
   panel.insertAdjacentHTML("beforeend", `<div class="pop-sep"></div><button type="button" role="menuitem" class="pop-option" data-outcome="negotiate"><span>Add negotiation note…</span></button><button type="button" role="menuitem" class="pop-option is-danger" data-outcome="fail"><span>Mark candidate as failed…</span></button>`);
-  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b || b.disabled) return; Pop.close(); if (b.dataset.form) openTask(taskFromCard(card, b.dataset.form === "mcu" ? "mcu" : "invite")); else if (b.dataset.outcome) openOutcomeDialog(rowNumber, b.dataset.outcome); else requestMove(rowNumber, b.dataset.stage || null); });
+  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b || b.disabled) return; Pop.close(); if (b.dataset.form) openTask(taskFromCard(card, b.dataset.form)); else if (b.dataset.outcome) openOutcomeDialog(rowNumber, b.dataset.outcome); else requestMove(rowNumber, b.dataset.stage || null); });
   panel.addEventListener("keydown", e => { if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return; e.preventDefault(); const items = [...panel.querySelectorAll(".pop-option:not(:disabled)")], i = items.indexOf(document.activeElement); items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus(); });
   Pop.open(button, panel); (panel.querySelector(".pop-option:not(:disabled)") || panel).focus({ preventScroll: true });
 }
@@ -917,9 +917,7 @@ async function submitRequest(e) {
   try {
     await api(PIPE_API, { method: "POST", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, action: "request", kind: "psikotest", date, location, testType, service }) });
     card.requests = { ...(card.requests || {}), psikotest: { dateIso: date, dateLabel: formatDate(date), location, testType, service } };
-    closeRequestDialog(); renderPipeline(); toast(`${card.code}: surat pengantar psikotes requested.`, "success"); loadPipeline(true, true);
-    // Next step straight away: the invitation form for the candidate.
-    openTask(taskFromCard(card, "invite"));
+    closeRequestDialog(); renderPipeline(); toast(`${card.code}: psikotest requested. Surat pengantar is now in Action Needed.`, "success", { duration: 5000 }); loadPipeline(true, true);
   } catch (error) { err.textContent = error.message; err.hidden = false; }
   finally { setBusy(btn, false, "Request surat pengantar"); }
 }
@@ -934,14 +932,18 @@ async function requestMcu(card) {
 }
 function taskFromCard(card, kind) {
   const base = { kind, pipelineRow: card.rowNumber, name: card.candidates || "", position: card.position, businessUnit: card.businessUnit, rfpCode: card.code, onBoard: true };
-  return kind === "mcu" ? { ...base, title: "Fill MCU form", dateLabel: card.requests?.mcu?.dateLabel || "" } : { ...base, title: "Send psikotest invitation", ...(card.requests?.psikotest || {}) };
+  if (kind === "mcu") return { ...base, title: "Fill MCU form", dateLabel: card.requests?.mcu?.dateLabel || "" };
+  if (kind === "spk") return { ...base, pending: true, title: "Permintaan Surat Pengantar Psikotes", ...(card.requests?.psikotest || {}), current: card.requests?.letter ? { dateIso: card.requests.letter.dateIso, noSpk: card.requests.letter.noSpk, link: card.requests.letter.link } : {} };
+  return { ...base, title: "Send psikotest invitation", ...(card.requests?.psikotest || {}) };
 }
 // Finished Psikotest / MCU requests: their line in Remarks is removed, quietly and one at a time.
 async function clearFinishedRequests(list) {
   if (!list?.length || state.clearingRequests) return; state.clearingRequests = true; let changed = false;
-  try { for (const item of list) { try { const result = await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "clearRequest", rowNumber: item.pipelineRow, code: item.code, kind: item.kind }) }); if (!result.unchanged) changed = true; } catch { /* left for the next Overview load */ } } }
+  try { for (const item of list) { try { if (item.sync) await api("/.netlify/functions/spk", { method: "POST", body: JSON.stringify({ ...item.sync, onlyEmpty: true }) }); const result = await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "clearRequest", rowNumber: item.pipelineRow, code: item.code, kind: item.kind }) }); if (!result.unchanged) changed = true; } catch { /* left for the next Overview load */ } } }
   finally { state.clearingRequests = false; }
   if (changed && state.pipe.loaded) loadPipeline(true, true);
+  // A letter that was just copied into SPK 2026 changes what is still open.
+  if (changed && list.some(item => item.sync) && $("page-overview").classList.contains("active")) loadDashboard(true, true);
 }
 const TASK_ICON = { invite: "file-check", spk: "file-signature", mcu: "heart-pulse" }, TASK_KIND = { invite: "psikotest", spk: "offering", mcu: "mcu" };
 function renderActions(d) {
@@ -957,7 +959,14 @@ function openTask(task) {
   $("taskError").hidden = true; $("taskPipeline").hidden = !task.pipelineRow || !!task.onBoard;
   if (kind === "spk") {
     const c = task.current || {}, locations = [...new Set([c.location, task.suggestedLocation, ...((state.requestOptions || {}).locations || [])].filter(Boolean))], location = c.location || task.suggestedLocation || "";
-    $("taskSummary").innerHTML = `<div><small>Psikotest</small><b>${esc(task.dateLabel || "No test date")}</b></div>${task.testType ? `<span class="days-chip neutral">${esc(task.testType)}</span>` : ""}${task.service ? `<span class="days-chip neutral">${esc(task.service)}</span>` : ""}<span class="summary-spacer"></span><span class="days-chip neutral">SPK 2026 · Row ${task.spkRow}</span>`;
+    $("taskSummary").innerHTML = `<div><small>Psikotest</small><b>${esc(task.dateLabel || "No test date")}</b></div>${task.testType ? `<span class="days-chip neutral">${esc(task.testType)}</span>` : ""}${task.service ? `<span class="days-chip neutral">${esc(task.service)}</span>` : ""}<span class="summary-spacer"></span>${task.pending ? "" : `<span class="days-chip neutral">SPK 2026 · Row ${task.spkRow}</span>`}`;
+    if (task.pending) {
+      // No row in SPK 2026 yet: the letter is recorded now and copied into the row once the invitation form has created it.
+      $("taskBody").innerHTML = `<div class="field-grid"><div class="field"><span class="field-label">DATE</span>${dateFieldHtml("date", c.dateIso || isoOf(new Date()), "taskDate")}</div><div class="field"><label class="field-label" for="taskNoSpk">NO SPK <em>*</em></label><input id="taskNoSpk" name="noSpk" value="${escAttr(c.noSpk || "")}" maxlength="120" autocomplete="off" placeholder="Enter the letter number"></div><div class="field field-full"><label class="field-label" for="taskLink">SPK (link surat) <em>*</em></label><input id="taskLink" name="link" type="url" value="${escAttr(c.link || "")}" autocomplete="off" placeholder="https://"></div><div class="field field-full"><span class="field-label">LOKASI TEST</span><div class="readonly-value">${esc(task.location || "—")}</div></div></div>`;
+      $("taskBody").querySelectorAll(".date-field").forEach(syncDateField);
+      $("taskPrimary").textContent = "Save and continue to invitation";
+      openModal("taskModal", $("taskNoSpk")); return;
+    }
     $("taskBody").innerHTML = `<div class="field-grid"><div class="field"><span class="field-label">DATE</span>${dateFieldHtml("date", c.dateIso || isoOf(new Date()), "taskDate")}</div><div class="field"><label class="field-label" for="taskNoSpk">NO SPK <em>*</em></label><input id="taskNoSpk" name="noSpk" value="${escAttr(c.noSpk || "")}" maxlength="120" autocomplete="off" placeholder="Enter the letter number"></div><div class="field field-full"><span class="field-label">LOKASI TEST</span><select id="taskLocation" name="location" data-placeholder="Select vendor"><option value=""></option>${locations.map(o => `<option value="${escAttr(o)}" ${o === location ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div><div class="field field-full"><label class="field-label" for="taskLink">SPK (link surat) <em>*</em></label><input id="taskLink" name="link" type="url" value="${escAttr(c.link || "")}" autocomplete="off" placeholder="https://"></div></div><div class="section-label task-section">Row in SPK 2026</div><dl class="info-grid">${(task.details || []).map(item => `<div><dt>${esc(item.label === item.label.toUpperCase() ? headerLabel(item.label) : item.label)}</dt><dd>${esc(item.value)}</dd></div>`).join("")}</dl>`;
     $("taskBody").querySelectorAll(".date-field").forEach(syncDateField); enhanceSelect($("taskLocation"));
     $("taskPrimary").textContent = "Save surat pengantar";
@@ -978,12 +987,26 @@ async function submitTask(e) {
     if (url) window.open(url, "_blank", "noopener"); else toast("The form link is not configured.", "warning");
     return;
   }
-  const values = { date: $("taskBody").querySelector('input[name="date"]').value, noSpk: $("taskNoSpk").value.trim(), location: $("taskLocation").value, link: $("taskLink").value.trim() };
+  const values = { date: $("taskBody").querySelector('input[name="date"]').value, noSpk: $("taskNoSpk").value.trim(), location: $("taskLocation")?.value || "", link: $("taskLink").value.trim() };
   // Only what actually changed is sent, so cells that already hold the same value are not rewritten.
   const current = task.current || {}, changed = {}; if (values.date !== (current.dateIso || "")) changed.date = values.date; ["noSpk", "location", "link"].forEach(key => { if (values[key] !== (current[key] || "")) changed[key] = values[key]; });
   err.hidden = true;
   const problem = !values.noSpk ? ["Enter the NO SPK.", "taskNoSpk"] : !values.link ? ["Paste the link to the surat pengantar.", "taskLink"] : !/^https?:\/\/\S+$/i.test(values.link) ? ["The SPK link must start with http:// or https://", "taskLink"] : null;
   if (problem) { err.textContent = problem[0]; err.hidden = false; $(problem[1]).focus(); return; }
+  if (task.pending) {
+    if (!values.date) { err.textContent = "Pick the DATE."; err.hidden = false; return; }
+    setBusy(btn, true, "Saving…");
+    try {
+      await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "letter", rowNumber: task.pipelineRow, code: task.rfpCode, date: values.date, noSpk: values.noSpk, link: values.link }) });
+      const card = pipeCard(task.pipelineRow); if (card) { card.requests = { ...(card.requests || {}), letter: { dateIso: values.date, noSpk: values.noSpk, link: values.link } }; renderPipeline(); }
+      toast(`Surat pengantar saved for ${task.name || task.rfpCode}.`, "success");
+      if ($("page-overview").classList.contains("active")) loadDashboard(true, true); else if (state.pipe.loaded) loadPipeline(true, true);
+      // Next step straight away: the invitation to the candidate.
+      setBusy(btn, false, "Save and continue to invitation");
+      openTask({ ...task, kind: "invite", pending: false, title: "Send psikotest invitation" });
+    } catch (error) { err.textContent = error.message; err.hidden = false; setBusy(btn, false, "Save and continue to invitation"); }
+    return;
+  }
   setBusy(btn, true, "Saving…");
   try { await api("/.netlify/functions/spk", { method: "POST", body: JSON.stringify({ rowNumber: task.spkRow, name: task.name, values: changed }) }); const name = task.name; closeTask(); toast(`Surat pengantar saved for ${name}.`, "success"); loadDashboard(true, true); }
   catch (error) { err.textContent = error.message; err.hidden = false; }

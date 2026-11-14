@@ -340,6 +340,7 @@ tr.is-muted td{color:var(--faint)}tr.is-muted .employee-cell b{color:var(--muted
 .copy-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}.copy-row{display:grid;grid-template-columns:190px minmax(0,1fr) 28px;align-items:center;gap:10px;min-height:40px;padding:4px 8px 4px 12px}.copy-row+.copy-row{border-top:1px solid var(--line)}
 .copy-row span{color:var(--muted);font-size:12px}.copy-row b{font-size:13px;font-weight:500;color:var(--ink);overflow-wrap:anywhere}.task-section{margin-top:18px}
 @media(max-width:1050px){.action-list{grid-template-columns:1fr}}@media(max-width:720px){.copy-row{grid-template-columns:1fr 28px}.copy-row span{grid-column:1/-1;margin-bottom:-6px}}
+.readonly-value{min-height:36px;padding:8px 12px;border:1px solid var(--line);border-radius:var(--r-s);background:var(--hover);color:var(--ink-2);font-size:13px;line-height:1.45}
 .joiner-when{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none}.joiner-when small{color:var(--faint);font-size:11px}
 
 /* ---------- Responsive ---------- */

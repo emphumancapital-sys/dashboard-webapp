@@ -52,3 +52,14 @@ A full-width panel at the top of the Overview listing only what the user still h
 - MCU: Nama Lengkap and Business Unit are filled. Email, Tanggal Lahir, Nomor Handphone, Lokasi MCU and Tanggal MCU are left for the user.
 - A value the card does not have is left out of the link. A Business Unit that is not one of the form's dropdown options is ignored by Google Forms and has to be chosen by hand.
 - The sample answers in the supplied links (name, email, phone) are not stored anywhere.
+
+## Corrected order: surat pengantar before the invitation
+The first version asked for the invitation first and only allowed the surat pengantar once the row existed in `SPK 2026`. The intended order is the other way round, and this is how it works now:
+
+1. **Request psikotest** on the card (date, vendor, Kategori Test, Kategori Layanan). Nothing else opens; the task appears in Action Needed.
+2. **Permintaan Surat Pengantar Psikotes** (Action Needed, or "Fill surat pengantar psikotes…" in the card menu): DATE, NO SPK and the SPK link. Because `SPK 2026` has no row for the candidate yet, the letter is kept as a second line in Remarks: `[SPK 14 Nov 2026] <NO SPK> · <link>`. `POST pipeline` `{ action:"letter", rowNumber, code, date, noSpk, link }`.
+3. Saving the letter **leads straight to the invitation dialog**. Until the invitation form has been submitted, "Send psikotest invitation" stays in Action Needed.
+4. When the form has created the row in `SPK 2026`, the next Overview load **copies DATE, NO SPK, LOKASI TEST and SPK into that row** (only into cells that are still empty) and then removes both lines from Remarks.
+
+- If a row already exists in `SPK 2026` without a letter (for example the form was filled outside the app), the surat pengantar task writes directly to that row, as before.
+- A request with a letter always targets the latest matching row for that candidate.

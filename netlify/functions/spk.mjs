@@ -35,6 +35,8 @@ export const handler = async event => {
       if (!value) continue; const index = at(FIELDS[key]);
       if (index < 0) return json(400, { error:`Column "${FIELDS[key]}" was not found in ${TAB}.` });
       if (String(live[index] ?? "").trim() === value) continue;
+      // Automatic copy of a prepared letter never replaces something already typed into the sheet.
+      if (body.onlyEmpty && String(live[index] ?? "").trim() !== "") continue;
       if (typeof formulas[index] === "string" && formulas[index].startsWith("=")) return json(409, { error:`${FIELDS[key]} (column ${colLetter(index)}) is calculated by a formula in this row and cannot be set from here.` });
       writes.push({ range:`${quoted}!${colLetter(index)}${rowNumber}`, values:[[value.startsWith("=") ? "'" + value : value]] });
     }
