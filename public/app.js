@@ -55,6 +55,8 @@ function bindEvents() {
   bindModal("moveModal", closeMoveDialog, ["closeMoveModal", "cancelMoveModal"]);
   bindModal("outcomeModal", closeOutcomeDialog, ["closeOutcomeModal", "cancelOutcomeModal"]);
   bindModal("contractModal", closeContractDetail, ["closeContractModal", "cancelContractModal"]);
+  bindModal("sendModal", closeSendDialog, ["closeSendModal", "cancelSendModal"]);
+  $("sendForm").addEventListener("submit", submitSend);
   $("contractSent").addEventListener("click", () => setContractStatus(state.contractRow, "sent", true));
   $("contractResign").addEventListener("click", () => setContractStatus(state.contractRow, "resign", true));
   bindModal("confirmModal", () => settleConfirm(false), ["confirmCancel"]);
@@ -101,7 +103,7 @@ function bindEvents() {
   });
   $("sourceTableBody").addEventListener("click", e => {
     const edit = e.target.closest("[data-record-edit]"), del = e.target.closest("[data-record-delete]"), send = e.target.closest("[data-record-send]");
-    if (send) sendRfpToPipeline(Number(send.dataset.recordSend), send.dataset.code);
+    if (send) { const row = state.currentRows.get(Number(send.dataset.recordSend)) || [], at = state.headers.findIndex(h => h.trim().toLowerCase() === "position"); sendRfpToPipeline(Number(send.dataset.recordSend), send.dataset.code, at > -1 ? String(row[state.columnIndexes[at]] ?? "") : ""); }
     else if (edit) openRecordModal(Number(edit.dataset.recordEdit));
     else if (del) deleteRecord(Number(del.dataset.recordDelete));
   });
@@ -592,6 +594,7 @@ function bindPipeline() {
   bindLocalSort("pipeFailedHead", "pipeFailed", renderPipeline);
   $("pipeFailedRows").addEventListener("click", e => { const tr = e.target.closest("[data-pipe-row]"); if (tr) openPipeDetail(Number(tr.dataset.pipeRow)); });
   $("outcomeForm").addEventListener("submit", submitOutcome);
+  $("outcomeContinue").addEventListener("change", () => { $("outcomeNextField").hidden = !$("outcomeContinue").checked; });
   $("pipeFailButton").addEventListener("click", () => { const rowNumber = state.pipe.detailRow; if (rowNumber) { closePipeDetail(); openOutcomeDialog(rowNumber, "fail"); } });
   board.addEventListener("click", e => {
     const cardEl = e.target.closest(".k-card"); if (!cardEl) return; const rowNumber = Number(cardEl.dataset.row);
@@ -698,7 +701,7 @@ function openOutcomeDialog(rowNumber, kind) {
   $("outcomeNoteLabel").innerHTML = (fail ? "Reason" : "What is being negotiated") + " <em>*</em>"; $("outcomeNote").value = ""; $("outcomeNote").placeholder = fail ? (atOffer ? "e.g. Declined the offer, accepted another company" : "e.g. Did not pass the interview") : "e.g. Asked for a higher salary and a later join date";
   $("outcomeNoteHelp").textContent = fail ? `Added to Remarks. ${state.pipe.outcomeHeader || "Status"} is set to Failed and this row leaves the board.` : "Added to Remarks as a dated line. The card stays in its stage.";
   $("outcomeDateSlot").innerHTML = dateFieldHtml("outcomeDate", isoOf(new Date()), "outcomeDateTrigger"); syncDateField($("outcomeDateSlot").firstElementChild);
-  $("outcomeContinueField").hidden = !fail; $("outcomeContinue").checked = true; $("outcomeError").hidden = true;
+  $("outcomeContinueField").hidden = !fail; $("outcomeContinue").checked = true; $("outcomeNext").value = ""; $("outcomeNextField").hidden = !fail; $("outcomeError").hidden = true;
   $("outcomeOk").textContent = fail ? "Mark as failed" : "Save note"; $("outcomeOk").className = fail ? "danger-button" : "primary-button";
   openModal("outcomeModal", $("outcomeNote"));
 }
@@ -709,7 +712,7 @@ async function submitOutcome(e) {
   if (!note || !date) { err.textContent = !note ? (fail ? "Enter the reason." : "Enter a short note.") : "Pick a date."; err.hidden = false; (!note ? $("outcomeNote") : $("outcomeDateTrigger")).focus(); return; }
   const label = btn.textContent; setBusy(btn, true, "Saving…");
   try {
-    const result = await api(PIPE_API, { method: "POST", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, action: fail ? "fail" : "negotiate", note, date, continue: fail && $("outcomeContinue").checked }) });
+    const result = await api(PIPE_API, { method: "POST", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, action: fail ? "fail" : "negotiate", note, date, continue: fail && $("outcomeContinue").checked, candidate: fail && $("outcomeContinue").checked ? $("outcomeNext").value.trim().replace(/\s+/g, " ") : "" }) });
     closeOutcomeDialog();
     if (fail) { card.group = "failed"; card.lastNote = note; toast(result.newRow ? `${card.code}: candidate marked as failed. A new row was added for the next candidate.` : `${card.code}: candidate marked as failed.`, "success", { duration: 5000 }); if (result.warning) toast(result.warning, "warning", { duration: 12000 }); }
     else { card.negotiations = (card.negotiations || 0) + 1; card.lastNote = note; toast(`${card.code}: negotiation noted.`, "success"); }
@@ -753,21 +756,28 @@ function openUnsentList(button) {
   if (Pop.current?.anchor === button) { Pop.close(); return; }
   const panel = document.createElement("div"); panel.className = "select-pop unsent-pop"; panel.tabIndex = -1;
   panel.innerHTML = `<div class="pop-title">In ${esc(state.pipe.rfpTab)} but not yet in the pipeline</div><div class="pop-list">${state.pipe.unsent.map(r => `<div class="unsent-row"><div><b>${esc(r.code)}</b><small>${esc([r.position, r.businessUnit].filter(Boolean).join(" · ") || "—")}</small>${r.failedBefore ? `<small class="is-retry">Previous candidate failed · needs a new row</small>` : ""}</div><button type="button" class="k-next" data-send="${r.rowNumber}" data-code="${escAttr(r.code)}">${svgIcon("send", 12)}Send</button></div>`).join("")}</div>`;
-  panel.addEventListener("click", e => { const b = e.target.closest("[data-send]"); if (!b) return; Pop.close(); sendRfpToPipeline(Number(b.dataset.send), b.dataset.code); });
+  panel.addEventListener("click", e => { const b = e.target.closest("[data-send]"); if (!b) return; Pop.close(); const r = state.pipe.unsent.find(x => x.rowNumber === Number(b.dataset.send)); sendRfpToPipeline(Number(b.dataset.send), b.dataset.code, r?.position || ""); });
   Pop.open(button, panel); (panel.querySelector("[data-send]") || panel).focus({ preventScroll: true });
 }
-async function sendRfpToPipeline(rfpRowNumber, code) {
-  const p = state.pipe;
-  const ok = await confirmDialog({ title: `Send ${code} to the pipeline?`, message: `This adds one row to ${p.tab || "the pipeline tab"} with this RFP's details and sets ${p.statusHeader} to ongoing. It then appears on the Hiring Pipeline board under Sourcing.`, confirmLabel: "Send to pipeline", icon: "send" });
-  if (!ok) return;
-  setRefreshing(true);
+// Sending asks for the candidate's name, which goes into the Candidates column of the new pipeline row.
+function sendRfpToPipeline(rfpRowNumber, code, label = "") {
+  state.pipe.send = { rfpRowNumber, code };
+  $("sendSub").textContent = [code, label].filter(Boolean).join(" · "); $("sendCandidate").value = ""; $("sendError").hidden = true;
+  openModal("sendModal", $("sendCandidate"));
+}
+function closeSendDialog() { closeModal("sendModal"); state.pipe.send = null; }
+async function submitSend(e) {
+  e.preventDefault(); const p = state.pipe, send = p.send, btn = $("sendOk"), err = $("sendError"); if (!send) return;
+  const candidate = $("sendCandidate").value.trim().replace(/\s+/g, " "); err.hidden = true;
+  setBusy(btn, true, "Sending…");
   try {
-    await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "send", rfpRowNumber, code }) });
+    await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "send", rfpRowNumber: send.rfpRowNumber, code: send.code, candidate }) });
+    const code = send.code; closeSendDialog();
     p.codes.add(code); p.unsent = p.unsent.filter(r => r.code !== code); toast(`${code} sent to the pipeline.`, "success");
     await loadPipeline(true, true);
     if ($("page-data").classList.contains("active") && state.activeSource?.id === "rfp-master") loadSourceData(true);
-  } catch (error) { toast(error.message, "error", { duration: 9000 }); if (/already in/i.test(error.message)) loadPipeline(true, true); }
-  finally { setRefreshing(false); }
+  } catch (error) { err.textContent = error.message; err.hidden = false; if (/already in/i.test(error.message)) loadPipeline(true, true); }
+  finally { setBusy(btn, false, "Send to pipeline"); }
 }
 function closeMoveDialog() { closeModal("moveModal"); state.pipe.move = null; }
 function applyStageValues(card, values) {
@@ -971,20 +981,37 @@ function openDatePicker(field) {
   const today = new Date(), todayIso = isoOf(today), start = fromISO(input.value) || today;
   let viewY = start.getFullYear(), viewM = start.getMonth(), focusIso = input.value || todayIso;
   const panel = document.createElement("div"); panel.className = "date-pop"; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "Choose date");
-  const monthHtml = (y, m) => {
+  // mode: "days" (two months), "months" (pick any month of a year), "years" (pick any year)
+  let mode = "days", pickOffset = 0, pickYear = viewY;
+  const monthHtml = (y, m, offset) => {
     const lead = (new Date(y, m, 1).getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate(); let cells = "<i></i>".repeat(lead);
     for (let d = 1; d <= days; d++) { const iso = toISO(y, m, d), sunday = (lead + d - 1) % 7 === 6; cells += `<button type="button" tabindex="-1" class="dp-day${sunday ? " is-sunday" : ""}${iso === todayIso ? " is-today" : ""}${iso === input.value ? " is-selected" : ""}" data-date="${iso}" aria-label="${formatDate(iso, true)}"${iso === input.value ? ' aria-pressed="true"' : ""}>${d}</button>`; }
-    return `<div class="dp-month"><div class="dp-title">${MONTH_NAMES[m]} <span>${y}</span></div><div class="dp-week">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((w, i) => `<span${i === 6 ? ' class="is-sunday"' : ""}>${w}</span>`).join("")}</div><div class="dp-grid">${cells}</div></div>`;
+    return `<div class="dp-month"><button type="button" class="dp-title" data-pick="${offset}" title="Choose month and year">${MONTH_NAMES[m]} <span>${y}</span>${svgIcon("chevron-down", 12)}</button><div class="dp-week">${["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((w, i) => `<span${i === 6 ? ' class="is-sunday"' : ""}>${w}</span>`).join("")}</div><div class="dp-grid">${cells}</div></div>`;
   };
   const draw = (refocus = false) => {
+    if (mode !== "days") {
+      const selected = fromISO(input.value), base = Math.floor(pickYear / 12) * 12;
+      const cells = mode === "months"
+        ? MONTH_NAMES.map((name, i) => `<button type="button" class="dp-cell${selected && selected.getFullYear() === pickYear && selected.getMonth() === i ? " is-selected" : ""}${today.getFullYear() === pickYear && today.getMonth() === i ? " is-today" : ""}" data-month="${i}">${name.slice(0, 3)}</button>`).join("")
+        : Array.from({ length: 12 }, (_, i) => base + i).map(y => `<button type="button" class="dp-cell${selected && selected.getFullYear() === y ? " is-selected" : ""}${today.getFullYear() === y ? " is-today" : ""}" data-year="${y}">${y}</button>`).join("");
+      panel.innerHTML = `<div class="dp-pick-head"><button type="button" class="dp-step" data-step="-1" aria-label="${mode === "months" ? "Previous year" : "Earlier years"}">${svgIcon("chevron-left", 15)}</button>${mode === "months" ? `<button type="button" class="dp-title" data-years title="Choose year">${pickYear}${svgIcon("chevron-down", 12)}</button>` : `<span class="dp-title is-static">${base} – ${base + 11}</span>`}<button type="button" class="dp-step" data-step="1" aria-label="${mode === "months" ? "Next year" : "Later years"}">${svgIcon("chevron-right", 15)}</button></div><div class="dp-pick-grid">${cells}</div><div class="dp-foot"><button type="button" class="dp-link" data-back>Back to calendar</button><span></span><span></span></div>`;
+      if (refocus) (panel.querySelector(".dp-cell.is-selected") || panel.querySelector(".dp-cell")).focus({ preventScroll: true });
+      return;
+    }
     const next = new Date(viewY, viewM + 1, 1);
-    panel.innerHTML = `<div class="dp-nav dp-nav-prev"><button type="button" data-shift="-12" title="Previous year" aria-label="Previous year">${svgIcon("chevrons-left", 15)}</button><button type="button" data-shift="-1" title="Previous month" aria-label="Previous month">${svgIcon("chevron-left", 15)}</button></div><div class="dp-nav dp-nav-next"><button type="button" data-shift="1" title="Next month" aria-label="Next month">${svgIcon("chevron-right", 15)}</button><button type="button" data-shift="12" title="Next year" aria-label="Next year">${svgIcon("chevrons-right", 15)}</button></div><div class="dp-months">${monthHtml(viewY, viewM)}${monthHtml(next.getFullYear(), next.getMonth())}</div><div class="dp-foot"><button type="button" class="dp-link" data-today>Today</button><span class="dp-current">${input.value ? formatDate(input.value, true) : "No date selected"}</span>${input.value ? '<button type="button" class="dp-link muted" data-clear>Clear</button>' : "<span></span>"}</div>`;
+    panel.innerHTML = `<div class="dp-nav dp-nav-prev"><button type="button" data-shift="-12" title="Previous year" aria-label="Previous year">${svgIcon("chevrons-left", 15)}</button><button type="button" data-shift="-1" title="Previous month" aria-label="Previous month">${svgIcon("chevron-left", 15)}</button></div><div class="dp-nav dp-nav-next"><button type="button" data-shift="1" title="Next month" aria-label="Next month">${svgIcon("chevron-right", 15)}</button><button type="button" data-shift="12" title="Next year" aria-label="Next year">${svgIcon("chevrons-right", 15)}</button></div><div class="dp-months">${monthHtml(viewY, viewM, 0)}${monthHtml(next.getFullYear(), next.getMonth(), 1)}</div><div class="dp-foot"><button type="button" class="dp-link" data-today>Today</button><span class="dp-current">${input.value ? formatDate(input.value, true) : "No date selected"}</span>${input.value ? '<button type="button" class="dp-link muted" data-clear>Clear</button>' : "<span></span>"}</div>`;
     const target = panel.querySelector(`[data-date="${focusIso}"]`) || panel.querySelector(".dp-day"); if (target) { target.tabIndex = 0; if (refocus) target.focus({ preventScroll: true }); }
   };
   const shift = months => { const d = new Date(viewY, viewM + months, 1); viewY = d.getFullYear(); viewM = d.getMonth(); };
   panel.addEventListener("click", e => {
-    const day = e.target.closest(".dp-day"), nav = e.target.closest("[data-shift]");
-    if (day) { setDateField(field, day.dataset.date); Pop.close(true); }
+    const day = e.target.closest(".dp-day"), nav = e.target.closest("[data-shift]"), pick = e.target.closest("[data-pick]"), step = e.target.closest("[data-step]"), monthCell = e.target.closest("[data-month]"), yearCell = e.target.closest("[data-year]");
+    if (pick) { pickOffset = Number(pick.dataset.pick); const shown = new Date(viewY, viewM + pickOffset, 1); pickYear = shown.getFullYear(); mode = "months"; draw(true); Pop.place(); }
+    else if (e.target.closest("[data-years]")) { mode = "years"; draw(true); Pop.place(); }
+    else if (step) { pickYear += Number(step.dataset.step) * (mode === "years" ? 12 : 1); const keep = step.dataset.step; draw(); Pop.place(); panel.querySelector(`[data-step="${keep}"]`)?.focus({ preventScroll: true }); }
+    else if (yearCell) { pickYear = Number(yearCell.dataset.year); mode = "months"; draw(true); Pop.place(); }
+    else if (monthCell) { const d = new Date(pickYear, Number(monthCell.dataset.month) - pickOffset, 1); viewY = d.getFullYear(); viewM = d.getMonth(); focusIso = toISO(pickYear, Number(monthCell.dataset.month), 1); mode = "days"; draw(true); Pop.place(); }
+    else if (e.target.closest("[data-back]")) { mode = "days"; draw(true); Pop.place(); }
+    else if (day) { setDateField(field, day.dataset.date); Pop.close(true); }
     else if (nav) { shift(Number(nav.dataset.shift)); const keep = nav.dataset.shift; draw(); Pop.place(); panel.querySelector(`[data-shift="${keep}"]`)?.focus({ preventScroll: true }); }
     else if (e.target.closest("[data-today]")) { setDateField(field, todayIso); Pop.close(true); }
     else if (e.target.closest("[data-clear]")) { setDateField(field, ""); Pop.close(true); }
@@ -997,7 +1024,7 @@ function openDatePicker(field) {
     const diff = (d.getFullYear() - viewY) * 12 + d.getMonth() - viewM; if (diff < 0) shift(diff); else if (diff > 1) shift(diff - 1);
     draw(true);
   });
-  draw(); Pop.open(trigger, panel); (panel.querySelector('.dp-day[tabindex="0"]') || panel).focus({ preventScroll: true });
+  draw(); Pop.open(trigger, panel); panel.style.minWidth = panel.offsetWidth + "px"; (panel.querySelector('.dp-day[tabindex="0"]') || panel).focus({ preventScroll: true });
 }
 
 /* ---------- Value parsing shared with the server-side sort ---------- */

@@ -90,3 +90,9 @@ Defined in `netlify/functions/_lib/presets.mjs` and applied to `RFP 2026` and `2
 - Send to pipeline now refuses a duplicate only when the RFP already has a row that is not failed.
 - On Offering In cards the two outcomes are buttons on the card (Negotiating, Declined). At any other stage they are in the `...` menu, and Mark as failed is also in the card details.
 - There is no undo for a failed mark in the app. To reverse one, clear the Status cell in the sheet and delete the extra row if one was created.
+
+## Candidate name when sending, and date picker fix
+- Send to pipeline now opens a small dialog that asks for the candidate's name. `POST pipeline` `{ action:"send", ..., candidate }` writes it to the `Candidates` column of the new row. The name is optional; an empty name leaves the cell empty.
+- The failed-candidate dialog has the same optional field for the next candidate when "continue with a new candidate" is on.
+- Date picker: the month and year arrows could not be clicked with the mouse because the month title row was layered over them (keyboard navigation worked, which is why earlier checks missed it). Fixed with a stacking order change in `styles.css`.
+- Date picker: the month title is now a button. It opens a month grid for any month of the year, and from there a year grid, so any month of any year is two or three clicks away.

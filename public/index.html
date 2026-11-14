@@ -196,6 +196,7 @@
         <div class="field"><label class="field-label" for="outcomeNote" id="outcomeNoteLabel">Note <em>*</em></label><textarea id="outcomeNote" rows="3" maxlength="500"></textarea><small class="field-help" id="outcomeNoteHelp"></small></div>
         <div class="field"><span class="field-label">Date</span><div id="outcomeDateSlot"></div></div>
         <div class="field" id="outcomeContinueField"><label class="switch-field"><input type="checkbox" id="outcomeContinue" checked><i class="switch"></i><span>Continue this RFP with a new candidate</span></label><small class="field-help">Adds a new row for the same RFP under Sourcing. This row stays in the sheet as history.</small></div>
+        <div class="field" id="outcomeNextField"><label class="field-label" for="outcomeNext">Next candidate's name</label><input id="outcomeNext" maxlength="120" autocomplete="off" placeholder="Leave empty if not known yet"></div>
       </div></div>
       <div id="outcomeError" class="form-error" hidden></div>
       <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelOutcomeModal">Cancel</button><button class="primary-button" id="outcomeOk">Save</button></div></div>
@@ -207,6 +208,15 @@
     <div class="modal-body"><div class="contract-summary" id="contractSummary"></div><dl class="info-grid" id="contractInfo"></dl></div>
     <div id="contractError" class="form-error" hidden></div>
     <div class="modal-footer"><div class="modal-hint"><button type="button" class="text-button danger" id="contractResign">Mark as Resign</button></div><div class="modal-actions"><button type="button" class="secondary-button" id="cancelContractModal">Close</button><button type="button" class="primary-button" id="contractSent"></button></div></div>
+  </div></div>
+
+  <div class="modal-backdrop" id="sendModal" hidden><div class="modal move-modal" role="dialog" aria-modal="true" aria-labelledby="sendTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" data-icon="send"></span><div><h2 id="sendTitle">Send to pipeline</h2><p id="sendSub"></p></div></div><button type="button" class="close-button" id="closeSendModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <form id="sendForm" novalidate>
+      <div class="modal-body"><div class="field"><label class="field-label" for="sendCandidate">Candidate's name</label><input id="sendCandidate" maxlength="120" autocomplete="off" placeholder="Enter the candidate's name"></div></div>
+      <div id="sendError" class="form-error" hidden></div>
+      <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelSendModal">Cancel</button><button class="primary-button" id="sendOk">Send to pipeline</button></div></div>
+    </form>
   </div></div>
 
   <div class="modal-backdrop" id="confirmModal" hidden><div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">

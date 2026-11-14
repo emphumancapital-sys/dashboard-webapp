@@ -78,7 +78,7 @@ function remarksWrite(cols, rowNumber, live, line){
 }
 // Creates one pipeline row for `code` below the last record. `valueOf(header)` supplies the value for each shared column.
 // Returns { rowNumber } on success or { status, error } when refused; a refusal leaves the tab as it was.
-async function createPipelineRow(code, valueOf, tabData){
+async function createPipelineRow(code, valueOf, tabData, candidate = ""){
   const { headers, cols, records, values, rfp } = tabData;
   const ongoing = await statusValueFor("ongoing", cols, records);
   if (cols.status > -1 && !ongoing) return { status:422, error:`No "ongoing" value was found in the ${STATUS.header} dropdown or in existing rows, so the app will not guess one. Set it once in the sheet and try again.` };
@@ -114,6 +114,13 @@ async function createPipelineRow(code, valueOf, tabData){
     const value = String(valueOf(header, target) ?? "").trim(); if (value && dropped(target)) blocked.push(`${header} (${mergeLabel(dropped(target))})`); else if (value) writes.push({ range:`${quoted}!${colLetter(target)}${rowNumber}`, values:[[value.startsWith("=") ? "'" + value : value]] });
   });
   if (cols.status > -1 && !isFormula(formulas[cols.status])) writes.push({ range:`${quoted}!${colLetter(cols.status)}${rowNumber}`, values:[[ongoing]] });
+  // Candidate's name, when given, goes into the Candidates column of the new row.
+  if (candidate) {
+    const index = cols.info.candidates;
+    if (index < 0) { await undoFormulas(); return { status:400, error:`Column "Candidates" was not found in ${TAB}. Nothing was written.` }; }
+    if (isFormula(formulas[index])) { await undoFormulas(); return { status:409, error:`Candidates (column ${colLetter(index)}) is calculated by a formula in the new row, so a name cannot be written there. Nothing was written.` }; }
+    if (dropped(index)) blocked.push(`Candidates (${mergeLabel(dropped(index))})`); else writes.push({ range:`${quoted}!${colLetter(index)}${rowNumber}`, values:[[candidate.startsWith("=") ? "'" + candidate : candidate]] });
+  }
   // If RFP Code is not a formula in the new row, carry the existing code over as text (it is never generated here).
   if (!isFormula(formulas[cols.info.code])) writes.push({ range:`${quoted}!${colLetter(cols.info.code)}${rowNumber}`, values:[[code]] });
   if (blocked.length) { await undoFormulas(); return { status:409, error:`Row ${rowNumber} of ${TAB} has merged cells that would swallow these values: ${blocked.join(", ")}. Unmerge them in the sheet, then try again. Nothing was written.` }; }
@@ -137,9 +144,11 @@ async function sendToPipeline(actor, body){
   // A row whose candidate failed is history; only a live row blocks sending the same RFP again.
   const existing = records.find(r => String(r.row[cols.info.code] ?? "").trim() === code && !isFailed(r.row[cols.outcome]));
   if (existing) return json(409, { error:`${code} is already in ${TAB} (row ${existing.rowNumber}).`, rowNumber: existing.rowNumber });
-  const created = await createPipelineRow(code, header => source.row[rfp.col(header)], tabData);
+  const candidate = String(body.candidate ?? "").trim().replace(/\s+/g, " ");
+  if (candidate.length > 120) return json(400, { error:"Keep the candidate's name under 120 characters." });
+  const created = await createPipelineRow(code, header => source.row[rfp.col(header)], tabData, candidate);
   if (created.error) return json(created.status, { error: /^Could not|^Row |^No /.test(created.error) ? created.error : `Not sent. ${created.error}` });
-  await logActivity(actor, code, `${code}: sent to pipeline (row ${created.rowNumber})`);
+  await logActivity(actor, code, `${code}: sent to pipeline (row ${created.rowNumber})${candidate ? ` with candidate ${candidate}` : ""}`);
   return json(201, { success:true, rowNumber: created.rowNumber, code });
 }
 
@@ -260,7 +269,8 @@ export const handler = async event => {
       if (!body.continue) return json(200, { success:true, rowNumber, value: failedValue, newRow: null });
       // Continue the same RFP with the next candidate: a fresh row carrying the request details, no candidate, no stage dates.
       const tabData = await readTab(true);
-      const created = await createPipelineRow(code, (header, target) => live[target], tabData);
+      const nextCandidate = String(body.candidate ?? "").trim().replace(/\s+/g, " ").slice(0, 120);
+      const created = await createPipelineRow(code, (header, target) => live[target], tabData, nextCandidate);
       if (created.error) return json(200, { success:true, rowNumber, value: failedValue, newRow: null, warning:`The candidate was marked ${failedValue}, but the new row for the next candidate was not created. ${created.error}` });
       await logActivity(actor, code, `${code}: new row ${created.rowNumber} for the next candidate`);
       return json(200, { success:true, rowNumber, value: failedValue, newRow: created.rowNumber });
