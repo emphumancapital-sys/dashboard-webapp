@@ -6,6 +6,7 @@ const state = {
   searchTimer: null, recordSchema: null, schemaCache: new Map(), recordToken: 0, editingRowNumber: null, currentRows: new Map(),
   organization: [], organizationLoaded: false, organizationCategory: "Department", editingOrgRow: null,
   tableSort: { org: { key: null, dir: "desc" }, users: { key: null, dir: "desc" }, pipe: { key: null, dir: "desc" }, pipeFailed: { key: null, dir: "desc" } },
+  talent: { headers: [], rows: [], fields: {}, filters: {}, sort: { col: null, dir: "asc" }, page: 1, loaded: false, view: [] },
   pipe: { stages: [], cards: [], statusValues: [], codes: new Set(), unsent: [], rfpTab: "RFP 2026", view: "board", loaded: false, token: 0, drag: null, move: null, detailRow: null, tab: "", statusHeader: "RFP Process" }
 };
 const PAGE_SIZES = [25, 50, 100, 200];
@@ -74,7 +75,7 @@ function bindEvents() {
   $("contractSent").addEventListener("click", () => setContractStatus(state.contractRow, "sent", true));
   $("contractResign").addEventListener("click", () => setContractStatus(state.contractRow, "resign", true));
   bindModal("confirmModal", () => settleConfirm(false), ["confirmCancel"]);
-  bindPipeline();
+  bindPipeline(); bindTalent();
   $("confirmOk").addEventListener("click", () => settleConfirm(true));
 
   $("addUserButton").addEventListener("click", () => openUserModal());
@@ -181,12 +182,12 @@ function navigate(page, sourceId = null) {
   }
   else if (page === "organization") { $("breadcrumbCurrent").textContent = "Organization"; loadOrganization(); }
   else if (page === "hiring") { $("breadcrumbCurrent").textContent = "Hiring Pipeline"; loadPipeline(); }
-  else if (page === "talent") $("breadcrumbCurrent").textContent = "Talent Database";
+  else if (page === "talent") { $("breadcrumbCurrent").textContent = "Talent Database"; if (!state.talent.loaded) loadTalent(); }
   else { $("breadcrumbCurrent").textContent = "Overview"; if (state.dashboard) loadDashboard(); }
   $("sidebar").classList.remove("open");
   if (page === "users") loadUsers();
 }
-function refreshCurrent() { if ($("page-users").classList.contains("active")) loadUsers(); else if ($("page-data").classList.contains("active")) loadSourceData(true); else if ($("page-organization").classList.contains("active")) loadOrganization(); else if ($("page-hiring").classList.contains("active")) loadPipeline(true); else if ($("page-overview").classList.contains("active")) loadDashboard(true); }
+function refreshCurrent() { if ($("page-users").classList.contains("active")) loadUsers(); else if ($("page-data").classList.contains("active")) loadSourceData(true); else if ($("page-organization").classList.contains("active")) loadOrganization(); else if ($("page-hiring").classList.contains("active")) loadPipeline(true); else if ($("page-talent").classList.contains("active")) loadTalent(true); else if ($("page-overview").classList.contains("active")) loadDashboard(true); }
 function setRefreshing(on) { $("refreshButton").classList.toggle("is-busy", on); $("refreshButton").disabled = on; }
 
 /* ---------- Overview ---------- */
@@ -1057,6 +1058,116 @@ async function submitTask(e) {
   finally { setBusy(btn, false, "Save surat pengantar"); }
 }
 
+/* ---------- Talent Database: summary charts, column filters like a spreadsheet, pipeline marks ---------- */
+const TALENT_PAGE = 50, BLANK = "(Blanks)", STATUS_COL = "_f";
+const TALENT_STATUS = { pipeline: "In pipeline", processed: "Processed before", "": "Not processed" };
+const TALENT_CHARTS = [["gender", "Gender"], ["education", "Education Background"], ["major", "Major"], ["gradYear", "Year of Graduate"], ["age", "Age"]];
+const AGE_BANDS = [[0, 24, "Under 25"], [25, 29, "25–29"], [30, 34, "30–34"], [35, 39, "35–39"], [40, 44, "40–44"], [45, 200, "45 and over"]];
+const talentValue = (row, col) => col === STATUS_COL ? TALENT_STATUS[row.f || ""] : (row.v[col] || BLANK);
+function bindTalent() {
+  $("talentSearch").addEventListener("input", () => { $("talentSearchClear").hidden = !$("talentSearch").value; state.talent.page = 1; renderTalent(); });
+  $("talentSearchClear").addEventListener("click", () => { $("talentSearch").value = ""; $("talentSearchClear").hidden = true; state.talent.page = 1; renderTalent(); $("talentSearch").focus(); });
+  $("talentHead").addEventListener("click", e => {
+    const filter = e.target.closest("[data-filter]"), sort = e.target.closest(".th-sort"); const t = state.talent;
+    if (filter) { openTalentFilter(filter, filter.dataset.filter === STATUS_COL ? STATUS_COL : Number(filter.dataset.filter)); return; }
+    if (!sort) return; const col = sort.dataset.col === STATUS_COL ? STATUS_COL : Number(sort.dataset.col);
+    if (t.sort.col !== col) t.sort = { col, dir: "asc" }; else if (t.sort.dir === "asc") t.sort = { col, dir: "desc" }; else t.sort = { col: null, dir: "asc" };
+    t.page = 1; renderTalent();
+  });
+  $("talentPager").addEventListener("click", e => { const b = e.target.closest("[data-goto]"); if (!b || b.disabled) return; state.talent.page = Number(b.dataset.goto); renderTalent(true); $("talentScroll").scrollTop = 0; });
+  $("talentFilters").addEventListener("click", e => { const b = e.target.closest("[data-clear]"); if (!b) return; if (b.dataset.clear === "all") state.talent.filters = {}; else delete state.talent.filters[b.dataset.clear]; state.talent.page = 1; renderTalent(); });
+  // Clicking a bar filters the table to that value; clicking it again removes the filter.
+  $("talentCharts").addEventListener("click", e => {
+    const b = e.target.closest("[data-bar]"); if (!b) return; const t = state.talent, col = Number(b.dataset.col), values = JSON.parse(b.dataset.bar), current = t.filters[col];
+    const same = current && current.size === values.length && values.every(v => current.has(v));
+    if (same) delete t.filters[col]; else t.filters[col] = new Set(values); t.page = 1; renderTalent();
+  });
+}
+async function loadTalent(forceRefresh = false) {
+  const t = state.talent;
+  if (!t.loaded) { $("talentCharts").innerHTML = Array.from({ length: 5 }, () => `<div class="chart-card"><span class="skeleton" style="width:46%"></span>${Array.from({ length: 4 }, (_, i) => `<span class="skeleton" style="width:${[82, 64, 40, 28][i]}%;height:10px;margin-top:12px"></span>`).join("")}</div>`).join(""); $("talentHead").innerHTML = ""; $("talentRows").innerHTML = skeletonRows(7, 10); }
+  setRefreshing(true); $("talentError").hidden = true;
+  try {
+    const d = await api(`/.netlify/functions/talent${forceRefresh ? "?refresh=1" : ""}`);
+    Object.assign(t, { headers: d.headers || [], rows: d.rows || [], fields: d.fields || {}, loaded: true, page: 1 });
+    Object.keys(t.filters).forEach(key => { if (key !== STATUS_COL && Number(key) >= t.headers.length) delete t.filters[key]; });
+    $("talentSubtitle").textContent = `${d.total.toLocaleString()} candidates from ${d.tab}.`;
+    $("talentUpdated").textContent = `Updated ${new Date(d.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    if (d.warnings?.length) { $("talentError").hidden = false; $("talentError").textContent = d.warnings.join(" · "); }
+    renderTalent();
+  } catch (error) {
+    if (!t.loaded) { $("talentCharts").innerHTML = ""; $("talentRows").innerHTML = `<tr><td class="empty-cell">${emptyBlock("alert-triangle", "Talent Database could not be loaded", "See the message below.")}</td></tr>`; }
+    $("talentError").hidden = false; $("talentError").textContent = error.message;
+  } finally { setRefreshing(false); }
+}
+function talentFiltered(exceptCol = null) {
+  const t = state.talent, q = $("talentSearch").value.toLowerCase().trim(), active = Object.entries(t.filters).filter(([key]) => String(key) !== String(exceptCol));
+  return t.rows.filter(row => (!q || row.v.some(v => v.toLowerCase().includes(q))) && active.every(([key, set]) => set.has(talentValue(row, key === STATUS_COL ? STATUS_COL : Number(key)))));
+}
+function renderTalent(pageOnly = false) {
+  const t = state.talent; if (!t.loaded) return;
+  let rows = talentFiltered();
+  if (t.sort.col !== null) { const col = t.sort.col, sign = t.sort.dir === "asc" ? 1 : -1; rows = [...rows].sort((a, b) => { const x = talentValue(a, col), y = talentValue(b, col); if (x === BLANK && y !== BLANK) return 1; if (y === BLANK && x !== BLANK) return -1; return sign * x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" }); }); }
+  t.view = rows;
+  const pages = Math.max(1, Math.ceil(rows.length / TALENT_PAGE)); t.page = Math.min(t.page, pages);
+  const start = (t.page - 1) * TALENT_PAGE, slice = rows.slice(start, start + TALENT_PAGE), nameCol = t.fields.name;
+  const th = (col, label) => { const sorted = t.sort.col === col, filtered = !!t.filters[col]; return `<th class="${sorted ? "is-sorted" : ""}${filtered ? " is-filtered" : ""}"><div class="th-filter"><button type="button" class="th-sort" data-col="${col}" title="Sort by ${escAttr(label)}"><span class="th-text">${esc(label)}</span><span class="sort-ico">${svgIcon(sorted ? (t.sort.dir === "asc" ? "arrow-up" : "arrow-down") : "chevrons-up-down", 12)}</span></button><button type="button" class="th-funnel" data-filter="${col}" data-tip="Filter ${escAttr(label)}" aria-label="Filter ${escAttr(label)}" aria-haspopup="dialog">${svgIcon("filter", 12)}</button></div></th>`; };
+  $("talentHead").innerHTML = `<tr>${th(STATUS_COL, "Pipeline")}${t.headers.map((h, i) => th(i, h)).join("")}</tr>`;
+  $("talentRows").innerHTML = slice.length ? slice.map(row => `<tr>${`<td>${row.f ? `<span class="talent-flag is-${row.f}" data-tip="${escAttr([row.c, row.p, row.s].filter(Boolean).join(" · ") || TALENT_STATUS[row.f])}">${svgIcon(row.f === "pipeline" ? "workflow" : "check", 11)}${TALENT_STATUS[row.f]}</span>` : `<span class="talent-flag is-none">—</span>`}</td>`}${row.v.map((v, i) => `<td title="${escAttr(v)}"${i === nameCol ? ' class="is-name"' : ""}>${cellHtml(v)}</td>`).join("")}</tr>`).join("") : `<tr><td class="empty-cell" colspan="${t.headers.length + 1}">${emptyBlock("search", "No candidates match", "Change or clear the filters.")}</td></tr>`;
+  $("talentCount").textContent = `${rows.length.toLocaleString()} of ${t.rows.length.toLocaleString()} candidates`;
+  $("talentPageInfo").innerHTML = rows.length ? `Showing <b>${(start + 1).toLocaleString()}–${(start + slice.length).toLocaleString()}</b> of <b>${rows.length.toLocaleString()}</b>` : "No candidates to show";
+  const list = []; if (pages <= 7) for (let i = 1; i <= pages; i++) list.push(i); else { list.push(1); if (t.page > 4) list.push("…"); for (let i = Math.max(2, Math.min(t.page - 1, pages - 4)); i <= Math.min(pages - 1, Math.max(t.page + 1, 5)); i++) list.push(i); if (t.page < pages - 3) list.push("…"); list.push(pages); }
+  $("talentPager").innerHTML = rows.length ? `<button type="button" class="pager-btn" data-goto="${t.page - 1}" ${t.page <= 1 ? "disabled" : ""} aria-label="Previous page">${svgIcon("chevron-left", 15)}</button>${list.map(p => p === "…" ? '<span class="pager-gap">…</span>' : `<button type="button" class="pager-btn ${p === t.page ? "is-current" : ""}" data-goto="${p}">${p}</button>`).join("")}<button type="button" class="pager-btn" data-goto="${t.page + 1}" ${t.page >= pages ? "disabled" : ""} aria-label="Next page">${svgIcon("chevron-right", 15)}</button>` : "";
+  if (pageOnly) return;
+  const names = Object.keys(t.filters);
+  $("talentFilters").innerHTML = names.length ? names.map(key => { const label = key === STATUS_COL ? "Pipeline" : t.headers[Number(key)], set = t.filters[key]; return `<span class="filter-chip"><b>${esc(label)}</b>${esc(set.size === 1 ? [...set][0] : `${set.size} values`)}<button type="button" data-clear="${key}" aria-label="Remove filter on ${escAttr(label)}">${svgIcon("x", 11)}</button></span>`; }).join("") + (names.length > 1 ? `<button type="button" class="text-button" data-clear="all">Clear all</button>` : "") : "";
+  renderTalentCharts(rows);
+}
+// One ranked list of bars per chart: a name, a bar on a shared baseline, the count and its share.
+function renderTalentCharts(rows) {
+  const t = state.talent, total = rows.length;
+  $("talentCharts").innerHTML = TALENT_CHARTS.map(([field, title]) => {
+    const col = t.fields[field]; if (col === undefined || col < 0) return `<div class="chart-card"><h3>${title}</h3><p class="chart-missing">Column not found in the sheet.</p></div>`;
+    const counts = new Map(); rows.forEach(row => { const v = row.v[col] || BLANK; counts.set(v, (counts.get(v) || 0) + 1); });
+    let bars;
+    if (field === "age") {
+      bars = AGE_BANDS.map(([lo, hi, label]) => ({ label, values: [], count: 0 })); const other = { label: "Not filled", values: [], count: 0 };
+      counts.forEach((count, v) => { const n = parseFloat(v), band = Number.isFinite(n) ? bars[AGE_BANDS.findIndex(([lo, hi]) => n >= lo && n <= hi)] : null; const target = band || other; target.values.push(v); target.count += count; });
+      bars = [...bars.filter(b => b.count), ...(other.count ? [other] : [])];
+    } else {
+      const entries = [...counts.entries()].map(([v, count]) => ({ label: v === BLANK ? "Not filled" : v, values: [v], count }));
+      // Years keep their order; everything else is ranked largest first. Long tails fold into one last bar.
+      if (field === "gradYear") { entries.sort((a, b) => (parseFloat(a.label) || 0) - (parseFloat(b.label) || 0)); const keep = entries.slice(-10), rest = entries.slice(0, -10); bars = rest.length ? [{ label: `${keep[0].label} and earlier`, values: [...rest.flatMap(x => x.values), ...keep[0].values], count: rest.reduce((n, x) => n + x.count, keep[0].count) }, ...keep.slice(1)] : keep; }
+      else { entries.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)); const keep = entries.slice(0, 7), rest = entries.slice(7); bars = rest.length ? [...keep, { label: `${rest.length} others`, values: rest.flatMap(x => x.values), count: rest.reduce((n, x) => n + x.count, 0) }] : keep; }
+    }
+    const max = Math.max(1, ...bars.map(b => b.count)), active = t.filters[col];
+    return `<div class="chart-card"><h3>${title}</h3><div class="bar-list">${bars.length ? bars.map(b => { const on = active && active.size === b.values.length && b.values.every(v => active.has(v)), share = total ? Math.round(b.count / total * 100) : 0; return `<button type="button" class="bar-row${on ? " is-on" : ""}${active && !on ? " is-dim" : ""}" data-col="${col}" data-bar="${escAttr(JSON.stringify(b.values))}" data-tip="${escAttr(`${b.label}: ${b.count.toLocaleString()} (${share}%)`)}" aria-pressed="${on}"><span class="bar-name">${esc(b.label)}</span><span class="bar-track"><i style="width:${Math.max(2, b.count / max * 100)}%"></i></span><span class="bar-value">${b.count.toLocaleString()}<small>${share}%</small></span></button>`; }).join("") : `<p class="chart-missing">No data for this filter.</p>`}</div></div>`;
+  }).join("");
+}
+// Column filter in the style of a spreadsheet: sort, search, and a checklist of the values in that column.
+function openTalentFilter(button, col) {
+  if (Pop.current?.anchor === button) { Pop.close(); return; }
+  const t = state.talent, counts = new Map(); talentFiltered(col).forEach(row => { const v = talentValue(row, col); counts.set(v, (counts.get(v) || 0) + 1); });
+  const all = [...counts.keys()].sort((a, b) => a === BLANK ? 1 : b === BLANK ? -1 : a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  let chosen = new Set(t.filters[col] ? [...t.filters[col]].filter(v => counts.has(v)) : all);
+  const panel = document.createElement("div"); panel.className = "select-pop filter-pop"; panel.tabIndex = -1;
+  panel.innerHTML = `<div class="filter-sort"><button type="button" data-dir="asc">${svgIcon("arrow-up", 12)}Sort A → Z</button><button type="button" data-dir="desc">${svgIcon("arrow-down", 12)}Sort Z → A</button></div><div class="pop-search">${svgIcon("search", 14)}<input type="text" placeholder="Search values…" autocomplete="off" aria-label="Search values"></div><div class="filter-links"><button type="button" data-all>Select all</button><button type="button" data-none>Clear</button><span></span></div><div class="pop-list"></div><div class="filter-foot"><button type="button" class="secondary-button" data-cancel>Cancel</button><button type="button" class="primary-button" data-ok>OK</button></div>`;
+  const list = panel.querySelector(".pop-list"), search = panel.querySelector("input"); let visible = all;
+  const draw = () => { const q = search.value.toLowerCase().trim(); visible = q ? all.filter(v => v.toLowerCase().includes(q)) : all; panel.querySelector(".filter-links span").textContent = `${chosen.size} of ${all.length}`; list.innerHTML = visible.length ? visible.slice(0, 400).map(v => `<label class="filter-opt"><input type="checkbox" value="${escAttr(v)}" ${chosen.has(v) ? "checked" : ""}><span>${esc(v)}</span><em>${counts.get(v).toLocaleString()}</em></label>`).join("") + (visible.length > 400 ? `<div class="pop-empty">Search to narrow ${visible.length - 400} more values</div>` : "") : `<div class="pop-empty">No values match</div>`; };
+  list.addEventListener("change", e => { if (e.target.checked) chosen.add(e.target.value); else chosen.delete(e.target.value); panel.querySelector(".filter-links span").textContent = `${chosen.size} of ${all.length}`; });
+  search.addEventListener("input", draw);
+  panel.addEventListener("click", e => {
+    const dir = e.target.closest("[data-dir]");
+    if (dir) { t.sort = { col, dir: dir.dataset.dir }; t.page = 1; Pop.close(); renderTalent(); }
+    else if (e.target.closest("[data-all]")) { visible.forEach(v => chosen.add(v)); draw(); }
+    else if (e.target.closest("[data-none]")) { visible.forEach(v => chosen.delete(v)); draw(); }
+    else if (e.target.closest("[data-cancel]")) Pop.close(true);
+    else if (e.target.closest("[data-ok]")) { if (chosen.size === all.length || !chosen.size) delete t.filters[col]; else t.filters[col] = new Set(chosen); t.page = 1; Pop.close(); renderTalent(); }
+  });
+  panel.addEventListener("keydown", e => { if (e.key === "Enter" && e.target === search) { e.preventDefault(); panel.querySelector("[data-ok]").click(); } });
+  draw(); Pop.open(button, panel); search.focus({ preventScroll: true });
+}
+
 /* ---------- Local (client-side) table sort: Organization + Users ---------- */
 function bindLocalSort(headId, name, render) {
   $(headId).addEventListener("click", e => {
@@ -1320,6 +1431,7 @@ const ICONS = {
   "ban": `<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>`,
   "pencil": `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>`,
   "trash": `<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>`,
+  "filter": `<path d="M3 5h18l-7 8v6l-4 2v-8z"/>`,
   "mail": `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>`,
   "copy": `<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`,
   "send": `<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`,

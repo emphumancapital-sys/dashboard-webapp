@@ -123,8 +123,17 @@
         <div class="warning-box" id="pipeError" hidden></div>
       </section>
       <section class="page" id="page-talent">
-        <div class="page-heading"><div><h1>Talent Database</h1><p>Find candidates for open requests.</p></div></div>
-        <section class="panel"><div class="empty-block"><span data-icon="users"></span><b>Talent Database is not built yet</b><p>This page is the destination of "Find candidate". Its content will be defined in the next phase.</p></div></section>
+        <div class="page-heading"><div><h1>Talent Database</h1><p id="talentSubtitle">Candidates available for open requests.</p></div><div class="heading-actions"><span class="updated-label" id="talentUpdated">—</span></div></div>
+        <div class="talent-charts" id="talentCharts"></div>
+        <div class="data-toolbar">
+          <div class="search-box"><span data-icon="search"></span><input id="talentSearch" placeholder="Search any column…" autocomplete="off" aria-label="Search talent"><button type="button" class="search-clear" id="talentSearchClear" aria-label="Clear search" title="Clear search" hidden><span data-icon="x"></span></button></div>
+          <div class="filter-chips" id="talentFilters"></div>
+          <span class="toolbar-spacer"></span>
+          <span class="record-count" id="talentCount">—</span>
+        </div>
+        <section class="panel talent-panel"><div class="table-scroll" id="talentScroll"><table id="talentTable"><thead id="talentHead"></thead><tbody id="talentRows"></tbody></table></div></section>
+        <div class="data-pagination"><span id="talentPageInfo">—</span><div class="pager" id="talentPager"></div></div>
+        <div class="warning-box" id="talentError" hidden></div>
       </section>
       <section class="page" id="page-organization">
         <div class="page-heading"><div><span class="group-chip">Master Data</span><h1>Organization</h1><p>Manage organization references used across EMP modules.</p></div><button class="primary-button" id="addOrgButton"><span data-icon="plus"></span> Add Item</button></div>
