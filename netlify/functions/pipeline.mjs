@@ -1,5 +1,6 @@
 import { json, bodyOf } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
+import { FORMS, REQUEST_OPTIONS, requestLine, parseRequests } from "./_lib/requests.mjs";
 import { readManyTabsFromSpreadsheet, getSheetRowFormulas, getSheetCrudMetadata, writeSheetValues, clearSheetValues, addActivity, inferColumnMeta, toIsoDate, ensureSheetRowExists, copyFormulaColumnsFromPrevious, getSheetMerges, mergeAt, mergeLabel } from "./_lib/sheets.mjs";
 
 // Hiring Pipeline: a stage view over the recruitment pipeline tab.
@@ -191,6 +192,7 @@ export const handler = async event => {
         const info = Object.fromEntries(Object.keys(INFO).map(key => [key, text(row, cols.info[key])]));
         const remarkLines = info.remarks.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
         cards.push({ rowNumber, ...info, receivedIso, hiringDateIso: iso(row, cols.info.hiringDate), status, outcome, group, stage: current, stages,
+          requests: parseRequests(info.remarks),
           negotiations: remarkLines.filter(x => x.startsWith(`[${NEGO_TAG} `)).length, lastNote: remarkLines[remarkLines.length - 1] || "",
           failedBefore: group === "failed" ? 0 : (failedByCode.get(info.code) || 0),
           daysOpen: receivedIso ? Math.max(0, Math.floor((today - Date.parse(receivedIso + "T00:00:00Z")) / 86400000)) : null });
@@ -198,7 +200,7 @@ export const handler = async event => {
       return json(200, {
         tab: TAB, statusHeader: STATUS.header,
         stages: cols.stages.map(s => ({ key:s.key, label:s.label, mode:s.mode, source:s.source || null, column: s.columns[0].index > -1 ? colLetter(s.columns[0].index) : null })),
-        cards, codes: [...liveCodes], outcomeHeader: OUTCOME.header,
+        cards, codes: [...liveCodes], outcomeHeader: OUTCOME.header, forms: FORMS, requestOptions: REQUEST_OPTIONS,
         // RFPs in the intake tab that have no row in the pipeline tab yet.
         unsent: (() => { const inPipeline = liveCodes; const get = (row, name) => { const i = rfp.col(name); return i < 0 ? "" : String(row[i] ?? "").trim(); }; return rfp.rows.filter(r => !inPipeline.has(get(r.row, "RFP Code"))).map(r => ({ rowNumber: r.rowNumber, code: get(r.row, "RFP Code"), position: get(r.row, "Position"), businessUnit: get(r.row, "Business Unit"), received: get(r.row, "RFP Received"), failedBefore: failedByCode.get(get(r.row, "RFP Code")) || 0 })).reverse(); })(),
         rfpTab: RFP.tab, statusValues: [...counts.entries()].map(([value, count]) => ({ value, count, group: statusGroup(value) })).sort((a, b) => b.count - a.count),
@@ -243,6 +245,37 @@ export const handler = async event => {
       const after = cols.stages.filter(s => { const v = body.values?.[s.key]; return v !== undefined ? !!String(v).trim() : s.columns.some(c => !c.detailOnly && filled(live[c.index])); }).pop();
       await logActivity(actor, code, `${code}: stage set to ${after ? after.label : "Sourcing"}`);
       return json(200, { success:true, rowNumber, stage: after ? after.key : null });
+    }
+
+    if (body.action === "clearRequest") {
+      // A finished Psikotest or MCU request: remove its line(s) from Remarks and keep every other line as it is.
+      const kind = body.kind === "mcu" ? "MCU" : body.kind === "psikotest" ? "Psikotest" : null, index = cols.info.remarks;
+      if (!kind || index < 0) return json(400, { error:"Unknown request." });
+      const lines = String(live[index] ?? "").split(/\r?\n/), kept = lines.filter(line => !line.trim().startsWith(`[${kind} `));
+      if (kept.length === lines.length) return json(200, { success:true, rowNumber, unchanged:true });
+      if (isFormula(formulas[index])) return json(409, { error:"Remarks is calculated by a formula in this row." });
+      const text = kept.join("\n").trim(), range = `${quoted}!${colLetter(index)}${rowNumber}`;
+      if (text) await writeSheetValues(MAIN_ID, [{ range, values:[[text.startsWith("=") ? "'" + text : text]] }]); else await clearSheetValues(MAIN_ID, [range]);
+      await logActivity(actor, code, `${code}: ${kind} request finished, note removed from Remarks`);
+      return json(200, { success:true, rowNumber });
+    }
+
+    if (body.action === "request") {
+      // Psikotest or MCU request: one dated line in Remarks. The stage columns themselves are formulas fed by the SPK and MCU tabs.
+      const kind = body.kind === "mcu" ? "mcu" : body.kind === "psikotest" ? "psikotest" : null;
+      if (!kind) return json(400, { error:"Unknown request." });
+      if (isFailed(live[cols.outcome])) return json(409, { error:"This candidate is marked as failed." });
+      if (statusGroup(liveStatus) === "completed") return json(409, { error:"This request is already completed." });
+      const date = String(body.date ?? "").trim(), location = String(body.location ?? "").trim(), testType = String(body.testType ?? "").trim(), service = String(body.service ?? "").trim();
+      if (!validIso(date)) return json(400, { error:"Pick a valid date." });
+      if (kind === "psikotest") {
+        if (!REQUEST_OPTIONS.locations.includes(location)) return json(400, { error:"Choose a test location from the list." });
+        if (!REQUEST_OPTIONS.testTypes.includes(testType)) return json(400, { error:"Choose Seleksi or Promosi." });
+        if (!REQUEST_OPTIONS.services.includes(service)) return json(400, { error:"Choose Standard or Quick." });
+      }
+      await writeSheetValues(MAIN_ID, [remarksWrite(cols, rowNumber, live, requestLine(kind, { date, location, testType, service }))]);
+      await logActivity(actor, code, kind === "mcu" ? `${code}: MCU requested` : `${code}: psikotest requested (${testType}, ${service})`);
+      return json(200, { success:true, rowNumber, kind });
     }
 
     if (body.action === "negotiate" || body.action === "fail") {

@@ -1,6 +1,7 @@
 import { json } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
 import { readManyTabsFromSpreadsheet, listActivity } from "./_lib/sheets.mjs";
+import { FORMS, REQUEST_OPTIONS, parseRequests, personKey } from "./_lib/requests.mjs";
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2zaUJf_CW2VYk";
 const TABS = [
@@ -112,11 +113,13 @@ export const handler = async event => {
       }
     });
     // Read separately so the Overview still loads if one of these tabs is missing or renamed.
+    const extraTabs={};
     for(const tab of SCHEDULE_TABS){
       let values=[];
       try{values=(await readManyTabsFromSpreadsheet(SPREADSHEET_ID,[tab],{forceRefresh:event.queryStringParameters?.refresh==="1"})).get(tab.key)?.values||[];}
       catch(error){scheduleWarnings.push(`${tab.label} schedule unavailable (${tab.title}): ${error.message||"unknown error"}`);continue;}
       const headers=(values[0]||[]).map(value=>String(value??"").trim()),at=name=>name?col(headers,name):-1,dateCol=at(tab.date);
+      extraTabs[tab.key]={headers,values,at};
       if(dateCol<0){scheduleWarnings.push(`${tab.label} schedule unavailable: column "${tab.date}" was not found in ${tab.title}.`);continue;}
       values.slice(1).forEach((row,index)=>{
         const date=parseDate(dateOnly(val(row,dateCol)));if(!date)return;
@@ -125,6 +128,52 @@ export const handler = async event => {
           details:headers.map((name,i)=>({label:name,value:String(row[i]??"").trim()})).filter(item=>item.label&&!blank(item.value))});
       });
     }
+    // Action Needed: tasks the user still has to do, derived from requests on the board and from the SPK and MCU tabs.
+    // cleanup: requests that are finished, whose line in Remarks can now be removed (done by the client through pipeline.mjs).
+    const cleanup=[];
+    const actions=[],ivRemarks=col(rfp.headers,"Remarks"),spkTab=extraTabs.spk,mcuTab=extraTabs.mcu;
+    const filled=value=>!blank(value);
+    const spkCols=spkTab?{name:spkTab.at("NAMA PESERTA"),no:spkTab.at("NO SPK"),link:spkTab.at("SPK"),date:spkTab.at("DATE"),location:spkTab.at("LOKASI TEST"),test:spkTab.at("TEST"),position:spkTab.at("POSISI"),bu:spkTab.at("B.U"),rfp:spkTab.at("RFP")}:null;
+    const spkRows=spkTab&&spkCols.name>-1?spkTab.values.slice(1).map((row,index)=>({row,rowNumber:2+index})).filter(item=>filled(item.row[spkCols.name])):[];
+    const mcuRows=mcuTab&&mcuTab.at("Nama Lengkap")>-1?mcuTab.values.slice(1).map(row=>({key:personKey(row[mcuTab.at("Nama Lengkap")]),date:mcuTab.at("Tanggal MCU")>-1?parseDate(dateOnly(row[mcuTab.at("Tanggal MCU")])):null})).filter(item=>item.key):[];
+    const dayOf=iso=>new Date(iso+"T00:00:00");
+    // A row answers a request only if it is for the same person and belongs to this round, so an older test of a returning candidate does not hide a new task.
+    const spkAnswers=(item,key,request)=>{if(personKey(item.row[spkCols.name])!==key)return false;const test=spkCols.test>-1?parseDate(dateOnly(item.row[spkCols.test])):null;return !test||Math.abs(test-dayOf(request.dateIso))<=60*86400000;};
+    const mcuAnswers=(item,key,request)=>item.key===key&&(!item.date||item.date>=dayOf(request.dateIso));
+    const requestByName=new Map();
+    pipeValues.slice(1).forEach((row,index)=>{
+      if(![0,5].some(i=>row[i]!==undefined&&row[i]!==null&&row[i]!==""))return;
+      if(/fail|gagal/i.test(String(val(row,ivOutcome)))||/complet|done|closed|selesai|cancel/i.test(String(val(row,ivProcess))))return;
+      const requests=parseRequests(val(row,ivRemarks));if(!requests.psikotest&&!requests.mcu)return;
+      const candidate=String(val(row,ivCandidate)||"").trim(),key=personKey(candidate);
+      const base={pipelineRow:2+index,name:candidate,position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),rfpCode:String(val(row,ivCode)||"")};
+      if(requests.psikotest){
+        if(key)requestByName.set(key,{...requests.psikotest,...base});
+        // The invitation form creates the SPK row; until a row with this name exists, the invitation is still to be sent.
+        const answered=spkTab&&key?spkRows.filter(item=>spkAnswers(item,key,requests.psikotest)):[];
+        // Finished once the surat pengantar is complete: the row has both NO SPK and the letter link.
+        if(answered.some(item=>filled(item.row[spkCols.no])&&filled(item.row[spkCols.link])))cleanup.push({pipelineRow:base.pipelineRow,code:base.rfpCode,kind:"psikotest"});
+        if(spkTab&&!(key&&spkRows.some(item=>spkAnswers(item,key,requests.psikotest))))actions.push({kind:"invite",title:"Send psikotest invitation",...base,...requests.psikotest,daysUntil:Math.ceil((new Date(requests.psikotest.dateIso+"T00:00:00")-today)/86400000)});
+      }
+      // MCU is finished once the form has created the row in MCU 2026.
+      if(requests.mcu&&mcuTab&&key&&mcuRows.some(item=>mcuAnswers(item,key,requests.mcu)))cleanup.push({pipelineRow:base.pipelineRow,code:base.rfpCode,kind:"mcu"});
+      if(requests.mcu&&mcuTab&&!(key&&mcuRows.some(item=>mcuAnswers(item,key,requests.mcu))))actions.push({kind:"mcu",title:"Fill MCU form",...base,dateIso:requests.mcu.dateIso,dateLabel:requests.mcu.dateLabel,daysUntil:null});
+    });
+    // Surat pengantar still open: an SPK row that has a participant but no NO SPK or no letter link.
+    for(const {row,rowNumber} of spkRows){
+      if(filled(row[spkCols.no])&&filled(row[spkCols.link]))continue;
+      const testDate=spkCols.test>-1?parseDate(dateOnly(row[spkCols.test])):null,daysUntil=testDate?Math.ceil((testDate-today)/86400000):null;
+      if(daysUntil!==null&&daysUntil<-30)continue; // older rows are history, not tasks
+      const name=String(row[spkCols.name]).trim(),found=requestByName.get(personKey(name)),request=found&&spkAnswers({row},personKey(name),found)?found:{};
+      const letterDate=spkCols.date>-1?parseDate(dateOnly(row[spkCols.date])):null;
+      actions.push({kind:"spk",title:"Permintaan Surat Pengantar Psikotes",spkRow:rowNumber,pipelineRow:request.pipelineRow||null,name,position:String(val(row,spkCols.position)||request.position||"—"),businessUnit:String(val(row,spkCols.bu)||request.businessUnit||"—"),rfpCode:String(val(row,spkCols.rfp)||request.rfpCode||""),
+        dateLabel:testDate?dateLabel(testDate):"",daysUntil,testType:request.testType||"",service:request.service||"",
+        current:{dateIso:letterDate?`${letterDate.getFullYear()}-${String(letterDate.getMonth()+1).padStart(2,"0")}-${String(letterDate.getDate()).padStart(2,"0")}`:"",noSpk:filled(row[spkCols.no])?String(row[spkCols.no]).trim():"",location:filled(row[spkCols.location])?String(row[spkCols.location]).trim():"",link:filled(row[spkCols.link])?String(row[spkCols.link]).trim():""},suggestedLocation:request.location||"",
+        details:spkTab.headers.map((label,i)=>({label,value:String(row[i]??"").trim()})).filter(item=>item.label&&!blank(item.value))});
+    }
+    const actionOrder={spk:0,invite:1,mcu:2};
+    actions.sort((a,b)=>(a.daysUntil??999)-(b.daysUntil??999)||actionOrder[a.kind]-actionOrder[b.kind]||a.name.localeCompare(b.name));
+
     const stepOrder=["1st Interview","2nd Interview","Offering In","Offering Done","Psikotest","MCU"];
     upcomingSchedule.sort((a,b)=>a.daysUntil-b.daysUntil||stepOrder.indexOf(a.label)-stepOrder.indexOf(b.label)||String(a.candidate||a.position).localeCompare(String(b.candidate||b.position)));
 
@@ -146,7 +195,7 @@ export const handler = async event => {
       },
       completion:{rfp:dashboardMetrics.rfpRate,newHire:dashboardMetrics.newHireRate,extension:dashboardMetrics.extensionRate,rfpCompleted:dashboardMetrics.rfpCompleted,newHireCompleted:dashboardMetrics.newHireCompleted,extensionCompleted:dashboardMetrics.extensionCompleted},
       contractAlerts,contractSummary:{needAction:contractAll.filter(x=>!x.done).length,overdue:contractAll.filter(x=>x.state==="overdue").length,done:contractAll.filter(x=>x.done).length,windowDays:CONTRACT_WINDOW_DAYS},
-      upcomingJoiners,joinWindowDays:JOIN_WINDOW_DAYS,upcomingSchedule:upcomingSchedule.slice(0,80),scheduleWindowDays:SCHEDULE_WINDOW_DAYS,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
+      upcomingJoiners,joinWindowDays:JOIN_WINDOW_DAYS,actions:actions.slice(0,100),cleanup:cleanup.slice(0,20),forms:FORMS,requestOptions:REQUEST_OPTIONS,upcomingSchedule:upcomingSchedule.slice(0,80),scheduleWindowDays:SCHEDULE_WINDOW_DAYS,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
       latestActivities:activities.slice(0,5),activityHistory:activities,warnings,
       dataBasis:{rfp:"2026 Rec Pipeline",newHire:"New Hire 2026",extension:"Extend 2026",employees:"Data Valid Employees",movement:"New Hire vs Exit",tpc:"2026 TPC Pipeline"}
     });

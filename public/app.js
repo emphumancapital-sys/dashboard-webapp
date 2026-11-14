@@ -14,7 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderStaticIcons(); initTheme(); initSidebar(); initCollapsibles(); initTooltips();
   try { const saved = Number(localStorage.getItem("emp-page-size")); if (PAGE_SIZES.includes(saved)) state.dataPageSize = saved; } catch {}
   $("dataPageSize").value = String(state.dataPageSize);
-  ["orgCategory", "userRole", "userStatus", "dataPageSize", "pipeBU"].forEach(id => enhanceSelect($(id), id === "dataPageSize" ? { compact: true } : {}));
+  ["orgCategory", "userRole", "userStatus", "dataPageSize", "pipeBU", "requestLocation", "requestType", "requestService"].forEach(id => enhanceSelect($(id), id === "dataPageSize" ? { compact: true } : {}));
   $("todayLabel").textContent = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(new Date());
   bindEvents();
   try {
@@ -57,6 +57,13 @@ function bindEvents() {
   bindModal("contractModal", closeContractDetail, ["closeContractModal", "cancelContractModal"]);
   bindModal("sendModal", closeSendDialog, ["closeSendModal", "cancelSendModal"]);
   bindModal("scheduleModal", closeScheduleDetail, ["closeScheduleModal", "cancelScheduleModal"]);
+  bindModal("requestModal", closeRequestDialog, ["closeRequestModal", "cancelRequestModal"]);
+  bindModal("taskModal", closeTask, ["closeTaskModal", "cancelTaskModal"]);
+  $("requestForm").addEventListener("submit", submitRequest);
+  $("taskForm").addEventListener("submit", submitTask);
+  $("actionList").addEventListener("click", e => { const b = e.target.closest("[data-action-index]"); if (b) openTask((state.dashboard?.actions || [])[Number(b.dataset.actionIndex)]); });
+  $("taskBody").addEventListener("click", e => { const b = e.target.closest("[data-copy]"); if (b && navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(() => toast("Copied.", "info", { duration: 1400 }), () => {}); });
+  $("taskPipeline").addEventListener("click", () => { const row = state.task?.pipelineRow; closeTask(); if (!row) return; state.pipe.openAfterLoad = row; navigate("hiring"); });
   $("scheduleList").addEventListener("click", e => { const b = e.target.closest("[data-schedule]"); if (b) openScheduleDetail(Number(b.dataset.schedule)); });
   // Jump from a schedule entry to the same request on the board.
   $("scheduleOpen").addEventListener("click", () => {
@@ -178,7 +185,7 @@ function navigate(page, sourceId = null) {
   }
   else if (page === "organization") { $("breadcrumbCurrent").textContent = "Organization"; loadOrganization(); }
   else if (page === "hiring") { $("breadcrumbCurrent").textContent = "Hiring Pipeline"; loadPipeline(); }
-  else $("breadcrumbCurrent").textContent = "Overview";
+  else { $("breadcrumbCurrent").textContent = "Overview"; if (state.dashboard) loadDashboard(); }
   $("sidebar").classList.remove("open");
   if (page === "users") loadUsers();
 }
@@ -186,9 +193,9 @@ function refreshCurrent() { if ($("page-users").classList.contains("active")) lo
 function setRefreshing(on) { $("refreshButton").classList.toggle("is-busy", on); $("refreshButton").disabled = on; }
 
 /* ---------- Overview ---------- */
-async function loadDashboard(forceRefresh = false) {
+async function loadDashboard(forceRefresh = false, quiet = false) {
   setRefreshing(true);
-  try { const data = await api(`/.netlify/functions/dashboard${forceRefresh ? "?refresh=1" : ""}`); renderDashboard(data); if (forceRefresh) toast("Overview refreshed.", "success", { duration: 1800 }); }
+  try { const data = await api(`/.netlify/functions/dashboard${forceRefresh ? "?refresh=1" : ""}`); renderDashboard(data); if (forceRefresh && !quiet) toast("Overview refreshed.", "success", { duration: 1800 }); }
   catch (e) { toast(e.message, "error"); }
   finally { setRefreshing(false); }
 }
@@ -206,7 +213,7 @@ function renderDashboard(d) {
   $("yearCaption").textContent = `${fmt(exits.resignation)} resignation · ${fmt(exits.termination)} termination · ${fmt(exits.retirement)} retirement`;
   $("rfpCount").textContent = (d.rfpAlerts || []).length + " recent records";
   $("lastUpdated").textContent = "Updated " + new Date(d.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  state.dashboard = d; renderContracts(); renderSchedule(d); renderJoiners(d);
+  state.dashboard = d; setRequestConfig(d); renderActions(d); clearFinishedRequests(d.cleanup); renderContracts(); renderSchedule(d); renderJoiners(d);
   $("rfpRows").innerHTML = d.rfpAlerts?.length ? d.rfpAlerts.map(r => `<tr><td><div class="employee-cell"><b>${esc(r.position)}</b><small>${esc(r.rfpCode)}</small></div></td><td>${esc(r.businessUnit)}</td><td>${esc(r.contract)}</td><td>${esc(r.process)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No RFP records received in ${d.currentYear}.</td></tr>`;
   $("rfpYearCaption").textContent = String(d.currentYear || "");
   renderActivity(d.latestActivities || [], $("latestActivity"), false); renderActivity(d.activityHistory || [], $("historyList"), true);
@@ -662,7 +669,7 @@ async function loadPipeline(forceRefresh = false, quiet = false) {
   try {
     const d = await api(`${PIPE_API}${forceRefresh ? "?refresh=1" : ""}`);
     if (token !== p.token) return;
-    p.stages = d.stages || []; p.cards = (d.cards || []).map(pipeDecorate); p.outcomeHeader = d.outcomeHeader || "Status"; p.statusValues = d.statusValues || []; p.codes = new Set(d.codes || []); p.unsent = d.unsent || []; p.rfpTab = d.rfpTab || p.rfpTab; p.tab = d.tab || ""; p.statusHeader = d.statusHeader || "RFP Process"; p.loaded = true;
+    p.stages = d.stages || []; setRequestConfig(d); p.cards = (d.cards || []).map(pipeDecorate); p.outcomeHeader = d.outcomeHeader || "Status"; p.statusValues = d.statusValues || []; p.codes = new Set(d.codes || []); p.unsent = d.unsent || []; p.rfpTab = d.rfpTab || p.rfpTab; p.tab = d.tab || ""; p.statusHeader = d.statusHeader || "RFP Process"; p.loaded = true;
     $("pipeError").hidden = true; $("pipeSubtitle").textContent = `Ongoing requests from ${p.tab}, stage by stage.`;
     $("pipeUpdated").textContent = `Updated ${new Date(d.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
     const units = [...new Set(p.cards.map(c => c.businessUnit).filter(Boolean))].sort((a, b) => a.localeCompare(b)), select = $("pipeBU"), keep = select.value;
@@ -701,11 +708,11 @@ function pipeCardHtml(card) {
   const next = state.pipe.stages[pipeStageIndex(card.stage) + 1], age = card.daysOpen;
   const since = card.stage ? pipeDate(card.stages[card.stage]) : (card.receivedIso ? formatDate(card.receivedIso) : card.received);
   const action = !next ? `<button type="button" class="k-next is-complete" data-pipe-complete title="Mark this request as completed">${svgIcon("check", 13)}Complete</button>`
-    : next.mode === "auto" ? `<span class="k-wait" title="${escAttr(next.label)} fills in automatically from ${escAttr(next.source)}">${svgIcon("clock", 12)}Waiting for ${esc(next.label)}</span>`
+    : next.mode === "auto" ? (card.requests?.[next.key] ? `<span class="k-wait" title="Requested. The card moves to ${escAttr(next.label)} once ${escAttr(next.source)} has the data.">${svgIcon("clock", 12)}${esc(next.label)} requested</span>` : `<button type="button" class="k-next" data-pipe-next="${next.key}" title="Request ${escAttr(next.label)}">${esc(next.label)}${svgIcon("arrow-right", 13)}</button>`)
     : `<button type="button" class="k-next" data-pipe-next="${next.key}" title="Move to ${escAttr(next.label)}">${esc(next.label)}${svgIcon("arrow-right", 13)}</button>`;
   return `<article class="k-card${card.pending ? " is-pending" : ""}" draggable="true" tabindex="0" data-row="${card.rowNumber}" aria-label="${escAttr(card.position || card.code)}">
     <div class="k-top"><span class="k-code">${esc(card.code || `Row ${card.rowNumber}`)}</span>${age === null ? "" : `<span class="k-age${age > 60 ? " late" : age > 30 ? " warn" : ""}" title="${age} day${age === 1 ? "" : "s"} since the RFP was received">${age}d</span>`}</div>
-    <b class="k-title">${esc(card.position || "Untitled position")}</b>${card.negotiations && card.stage === "offerIn" || card.failedBefore ? `<div class="k-badges">${card.negotiations && card.stage === "offerIn" ? `<span class="k-badge nego" title="${escAttr(card.lastNote)}">Negotiating${card.negotiations > 1 ? ` ×${card.negotiations}` : ""}</span>` : ""}${card.failedBefore ? `<span class="k-badge retry" title="${card.failedBefore} earlier candidate${card.failedBefore === 1 ? "" : "s"} failed for this RFP">Candidate #${card.failedBefore + 1}</span>` : ""}</div>` : ""}
+    <b class="k-title">${esc(card.position || "Untitled position")}</b>${card.negotiations && card.stage === "offerIn" || card.failedBefore || ["psikotest", "mcu"].some(k => card.requests?.[k] && !card.stages[k]?.reached) ? `<div class="k-badges">${card.negotiations && card.stage === "offerIn" ? `<span class="k-badge nego" title="${escAttr(card.lastNote)}">Negotiating${card.negotiations > 1 ? ` ×${card.negotiations}` : ""}</span>` : ""}${["psikotest", "mcu"].filter(k => card.requests?.[k] && !card.stages[k]?.reached).map(k => `<span class="k-badge request">${k === "mcu" ? "MCU" : "Psikotest"} requested</span>`).join("")}${card.failedBefore ? `<span class="k-badge retry" title="${card.failedBefore} earlier candidate${card.failedBefore === 1 ? "" : "s"} failed for this RFP">Candidate #${card.failedBefore + 1}</span>` : ""}</div>` : ""}
     <div class="k-meta">${esc([card.businessUnit, card.department].filter(Boolean).join(" · ") || "—")}</div>
     ${card.candidates ? `<div class="k-cand">${svgIcon("user", 12)}<span>${esc(card.candidates)}</span></div>` : ""}
     <div class="k-since">${svgIcon("calendar", 12)}${esc(card.stage ? `${pipeStage(card.stage).label}: ${since || "—"}` : `Received ${since || "—"}`)}</div>
@@ -753,7 +760,11 @@ async function submitOutcome(e) {
 function moveCheck(card, targetKey) {
   const stages = state.pipe.stages, t = pipeStageIndex(targetKey), current = pipeStageIndex(card.stage), target = pipeStage(targetKey);
   if (t === current) return { ok: false, same: true };
-  if (target.mode === "auto") return { ok: false, tone: "info", reason: `${target.label} fills in automatically from ${target.source}, so cards arrive there by themselves.` };
+  if (target.mode === "auto") {
+    // Psikotest and MCU are requested, not dated by hand: the card arrives in the column once the SPK or MCU tab has the data.
+    if (card.stages[target.key]?.reached) return { ok: false, tone: "info", reason: `${card.code} already has ${target.label} data in the sheet.` };
+    return { ok: true, request: target.key, target, cleared: [] };
+  }
   const blocking = stages.filter((s, i) => i > t && s.mode === "auto" && card.stages[s.key]?.reached);
   if (blocking.length) return { ok: false, tone: "warning", reason: `${card.code} already has ${blocking.map(s => s.label).join(" and ")} data in the sheet, so it can't move back before that stage.` };
   return { ok: true, target, cleared: stages.filter((s, i) => i > t && s.mode === "manual" && card.stages[s.key]?.reached) };
@@ -762,9 +773,11 @@ function openStageMenu(button, rowNumber) {
   if (Pop.current?.anchor === button) { Pop.close(); return; }
   const card = pipeCard(rowNumber); if (!card) return;
   const panel = document.createElement("div"); panel.className = "select-pop stage-menu"; panel.setAttribute("role", "menu"); panel.tabIndex = -1;
-  panel.innerHTML = `<div class="pop-title">Move ${esc(card.code)} to</div>` + pipeColumns().map(stage => { const check = moveCheck(card, stage.key), current = (card.stage || null) === stage.key; return `<button type="button" role="menuitem" class="pop-option${current ? " is-selected" : ""}" data-stage="${stage.key ?? ""}" ${check.ok ? "" : "disabled"} title="${escAttr(check.reason || (current ? "Current stage" : ""))}"><span>${esc(stage.label)}</span>${current ? svgIcon("check", 14) : stage.mode === "auto" ? `<em>${svgIcon("lock", 11)}Auto</em>` : ""}</button>`; }).join("");
+  panel.innerHTML = `<div class="pop-title">Move ${esc(card.code)} to</div>` + pipeColumns().map(stage => { const check = moveCheck(card, stage.key), current = (card.stage || null) === stage.key; return `<button type="button" role="menuitem" class="pop-option${current ? " is-selected" : ""}" data-stage="${stage.key ?? ""}" ${check.ok ? "" : "disabled"} title="${escAttr(check.reason || (current ? "Current stage" : ""))}"><span>${esc(stage.label)}</span>${current ? svgIcon("check", 14) : stage.mode === "auto" ? `<em>${check.ok ? (card.requests?.[stage.key] ? "Requested" : "Request") : `${svgIcon("lock", 11)}Auto`}</em>` : ""}</button>`; }).join("");
+  const pendingForms = ["psikotest", "mcu"].filter(k => card.requests?.[k] && !card.stages[k]?.reached);
+  if (pendingForms.length) panel.insertAdjacentHTML("beforeend", `<div class="pop-sep"></div>${pendingForms.map(k => `<button type="button" role="menuitem" class="pop-option" data-form="${k}"><span>${k === "mcu" ? "Open MCU form…" : "Open psikotest invitation…"}</span></button>`).join("")}`);
   panel.insertAdjacentHTML("beforeend", `<div class="pop-sep"></div><button type="button" role="menuitem" class="pop-option" data-outcome="negotiate"><span>Add negotiation note…</span></button><button type="button" role="menuitem" class="pop-option is-danger" data-outcome="fail"><span>Mark candidate as failed…</span></button>`);
-  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b || b.disabled) return; Pop.close(); if (b.dataset.outcome) openOutcomeDialog(rowNumber, b.dataset.outcome); else requestMove(rowNumber, b.dataset.stage || null); });
+  panel.addEventListener("click", e => { const b = e.target.closest(".pop-option"); if (!b || b.disabled) return; Pop.close(); if (b.dataset.form) openTask(taskFromCard(card, b.dataset.form === "mcu" ? "mcu" : "invite")); else if (b.dataset.outcome) openOutcomeDialog(rowNumber, b.dataset.outcome); else requestMove(rowNumber, b.dataset.stage || null); });
   panel.addEventListener("keydown", e => { if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return; e.preventDefault(); const items = [...panel.querySelectorAll(".pop-option:not(:disabled)")], i = items.indexOf(document.activeElement); items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus(); });
   Pop.open(button, panel); (panel.querySelector(".pop-option:not(:disabled)") || panel).focus({ preventScroll: true });
 }
@@ -772,6 +785,7 @@ function requestMove(rowNumber, targetKey) {
   const card = pipeCard(rowNumber); if (!card || card.pending) return;
   const check = moveCheck(card, targetKey || null);
   if (!check.ok) { if (check.reason) toast(check.reason, check.tone); return; }
+  if (check.request) { openRequestDialog(rowNumber, check.request); return; }
   const target = check.target, back = !target.key;
   state.pipe.move = { rowNumber, targetKey: target.key, cleared: check.cleared };
   $("moveTitle").textContent = back ? "Move back to Sourcing" : `Move to ${target.label}`; $("moveSub").textContent = [card.code, card.position].filter(Boolean).join(" · ");
@@ -865,6 +879,115 @@ async function savePipeDetail(e) {
   try { await api(PIPE_API, { method: "PATCH", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, values }) }); applyStageValues(card, values); closePipeDetail(); renderPipeline(); toast(`${card.code} updated${card.stage ? ` · now at ${pipeStage(card.stage).label}` : ""}.`, "success"); loadPipeline(true, true); }
   catch (error) { err.textContent = error.message; err.hidden = false; }
   finally { setBusy(btn, false, "Save Changes"); }
+}
+
+/* ---------- Psikotest / MCU requests and the tasks that follow ---------- */
+function setRequestConfig(d) {
+  if (d.forms) state.forms = d.forms;
+  if (!d.requestOptions) return; state.requestOptions = d.requestOptions;
+  const fill = (id, options) => { const select = $(id), keep = select.value; select.innerHTML = `<option value=""></option>${options.map(o => `<option value="${escAttr(o)}">${esc(o)}</option>`).join("")}`; select.value = options.includes(keep) ? keep : ""; syncSelect(select); };
+  fill("requestLocation", d.requestOptions.locations || []); fill("requestType", d.requestOptions.testTypes || []); fill("requestService", d.requestOptions.services || []);
+}
+// Form link for a task. With a prefill template the candidate's data is filled in; otherwise the plain form opens.
+function formUrl(kind, values) {
+  const form = (state.forms || {})[kind] || {};
+  if (!form.prefill) return form.url || "";
+  // Parameters whose value is unknown are dropped, so the form shows that field untouched.
+  const [base, query = ""] = form.prefill.split("?");
+  const params = query.split("&").map(pair => { const token = /=\{(\w+)\}$/.exec(pair); if (!token) return pair; const value = String(values[token[1]] ?? "").trim(); return value ? pair.replace(/\{\w+\}$/, encodeURIComponent(value)) : null; }).filter(Boolean);
+  return `${base}?${params.join("&")}`;
+}
+function openRequestDialog(rowNumber, kind) {
+  const card = pipeCard(rowNumber); if (!card || card.pending) return;
+  if (kind === "mcu") { requestMcu(card); return; }
+  state.pipe.request = { rowNumber, kind };
+  const previous = card.requests?.psikotest || {};
+  $("requestSub").textContent = [card.code, card.candidates || card.position].filter(Boolean).join(" · ");
+  $("requestDateSlot").innerHTML = dateFieldHtml("requestDate", previous.dateIso || "", "requestDateTrigger"); syncDateField($("requestDateSlot").firstElementChild);
+  [["requestLocation", previous.location], ["requestType", previous.testType], ["requestService", previous.service]].forEach(([id, value]) => { $(id).value = value && [...$(id).options].some(o => o.value === value) ? value : ""; syncSelect($(id)); });
+  $("requestError").hidden = true; openModal("requestModal", $("requestDateTrigger"));
+}
+function closeRequestDialog() { closeModal("requestModal"); state.pipe.request = null; }
+async function submitRequest(e) {
+  e.preventDefault(); const request = state.pipe.request, card = request && pipeCard(request.rowNumber), btn = $("requestOk"), err = $("requestError"); if (!card) return;
+  const date = $("requestDateSlot").querySelector("input").value, location = $("requestLocation").value, testType = $("requestType").value, service = $("requestService").value;
+  const missing = !date ? "Pick the psikotest date." : !location ? "Choose the test location." : !testType ? "Choose the Kategori Test." : !service ? "Choose the Kategori Layanan." : "";
+  err.hidden = true; if (missing) { err.textContent = missing; err.hidden = false; return; }
+  setBusy(btn, true, "Saving…");
+  try {
+    await api(PIPE_API, { method: "POST", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, action: "request", kind: "psikotest", date, location, testType, service }) });
+    card.requests = { ...(card.requests || {}), psikotest: { dateIso: date, dateLabel: formatDate(date), location, testType, service } };
+    closeRequestDialog(); renderPipeline(); toast(`${card.code}: surat pengantar psikotes requested.`, "success"); loadPipeline(true, true);
+    // Next step straight away: the invitation form for the candidate.
+    openTask(taskFromCard(card, "invite"));
+  } catch (error) { err.textContent = error.message; err.hidden = false; }
+  finally { setBusy(btn, false, "Request surat pengantar"); }
+}
+async function requestMcu(card) {
+  if (!card.requests?.mcu) {
+    const ok = await confirmDialog({ title: `Request MCU for ${card.candidates || card.code}?`, message: "It is added to Action Needed until the MCU form has been filled in.", confirmLabel: "Request MCU", icon: "heart-pulse" });
+    if (!ok) return;
+    try { const today = isoOf(new Date()); await api(PIPE_API, { method: "POST", body: JSON.stringify({ rowNumber: card.rowNumber, code: card.code, action: "request", kind: "mcu", date: today }) }); card.requests = { ...(card.requests || {}), mcu: { dateIso: today, dateLabel: formatDate(today) } }; renderPipeline(); toast(`${card.code}: MCU requested.`, "success"); loadPipeline(true, true); }
+    catch (error) { toast(error.message, "error"); return; }
+  }
+  openTask(taskFromCard(card, "mcu"));
+}
+function taskFromCard(card, kind) {
+  const base = { kind, pipelineRow: card.rowNumber, name: card.candidates || "", position: card.position, businessUnit: card.businessUnit, rfpCode: card.code, onBoard: true };
+  return kind === "mcu" ? { ...base, title: "Fill MCU form", dateLabel: card.requests?.mcu?.dateLabel || "" } : { ...base, title: "Send psikotest invitation", ...(card.requests?.psikotest || {}) };
+}
+// Finished Psikotest / MCU requests: their line in Remarks is removed, quietly and one at a time.
+async function clearFinishedRequests(list) {
+  if (!list?.length || state.clearingRequests) return; state.clearingRequests = true; let changed = false;
+  try { for (const item of list) { try { const result = await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "clearRequest", rowNumber: item.pipelineRow, code: item.code, kind: item.kind }) }); if (!result.unchanged) changed = true; } catch { /* left for the next Overview load */ } } }
+  finally { state.clearingRequests = false; }
+  if (changed && state.pipe.loaded) loadPipeline(true, true);
+}
+const TASK_ICON = { invite: "file-check", spk: "file-signature", mcu: "heart-pulse" }, TASK_KIND = { invite: "psikotest", spk: "offering", mcu: "mcu" };
+function renderActions(d) {
+  const rows = d.actions || [];
+  $("actionCount").textContent = `${rows.length} to do`; $("actionCount").hidden = !rows.length;
+  $("actionList").innerHTML = rows.length ? rows.map((r, i) => `<button type="button" class="activity-item schedule-item" data-action-index="${i}"><span class="schedule-ico is-${TASK_KIND[r.kind]}">${svgIcon(TASK_ICON[r.kind], 14)}</span><div class="activity-copy"><b>${esc(r.title)}</b><small><em>${esc(r.name || "No candidate name")}</em>${esc([r.position, r.businessUnit].filter(x => x && x !== "—").map(x => " · " + x).join(""))}</small></div>${r.dateLabel ? `<div class="joiner-when"><span class="days-chip ${r.daysUntil !== null && r.daysUntil <= 3 ? "critical" : "neutral"}">${r.kind === "mcu" ? "Requested" : r.daysUntil === null ? "Test" : r.daysUntil < 0 ? `${-r.daysUntil}d ago` : soonLabel(r.daysUntil)}</span><small>${esc(r.dateLabel)}</small></div>` : ""}${svgIcon("chevron-right", 14)}</button>`).join("") : `<div class="action-empty">${svgIcon("check-circle", 15)}Nothing needs your action</div>`;
+}
+const copyRow = (label, value) => `<div class="copy-row"><span>${esc(label)}</span><b>${esc(value || "—")}</b>${value ? `<button type="button" class="row-action" data-copy="${escAttr(value)}" data-tip="Copy" aria-label="Copy ${escAttr(label)}">${svgIcon("copy", 13)}</button>` : "<i></i>"}</div>`;
+function openTask(task) {
+  if (!task) return; state.task = task; const kind = task.kind;
+  $("taskIcon").className = "modal-icon schedule-ico is-" + TASK_KIND[kind]; $("taskIcon").innerHTML = svgIcon(TASK_ICON[kind], 17);
+  $("taskTitle").textContent = task.title; $("taskSub").textContent = [task.name, task.position !== "—" ? task.position : "", task.rfpCode].filter(Boolean).join(" · ");
+  $("taskError").hidden = true; $("taskPipeline").hidden = !task.pipelineRow || !!task.onBoard;
+  if (kind === "spk") {
+    const c = task.current || {}, locations = [...new Set([c.location, task.suggestedLocation, ...((state.requestOptions || {}).locations || [])].filter(Boolean))], location = c.location || task.suggestedLocation || "";
+    $("taskSummary").innerHTML = `<div><small>Psikotest</small><b>${esc(task.dateLabel || "No test date")}</b></div>${task.testType ? `<span class="days-chip neutral">${esc(task.testType)}</span>` : ""}${task.service ? `<span class="days-chip neutral">${esc(task.service)}</span>` : ""}<span class="summary-spacer"></span><span class="days-chip neutral">SPK 2026 · Row ${task.spkRow}</span>`;
+    $("taskBody").innerHTML = `<div class="field-grid"><div class="field"><span class="field-label">DATE</span>${dateFieldHtml("date", c.dateIso || isoOf(new Date()), "taskDate")}</div><div class="field"><label class="field-label" for="taskNoSpk">NO SPK <em>*</em></label><input id="taskNoSpk" name="noSpk" value="${escAttr(c.noSpk || "")}" maxlength="120" autocomplete="off" placeholder="Enter the letter number"></div><div class="field field-full"><span class="field-label">LOKASI TEST</span><select id="taskLocation" name="location" data-placeholder="Select vendor"><option value=""></option>${locations.map(o => `<option value="${escAttr(o)}" ${o === location ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div><div class="field field-full"><label class="field-label" for="taskLink">SPK (link surat) <em>*</em></label><input id="taskLink" name="link" type="url" value="${escAttr(c.link || "")}" autocomplete="off" placeholder="https://"></div></div><div class="section-label task-section">Row in SPK 2026</div><dl class="info-grid">${(task.details || []).map(item => `<div><dt>${esc(item.label === item.label.toUpperCase() ? headerLabel(item.label) : item.label)}</dt><dd>${esc(item.value)}</dd></div>`).join("")}</dl>`;
+    $("taskBody").querySelectorAll(".date-field").forEach(syncDateField); enhanceSelect($("taskLocation"));
+    $("taskPrimary").textContent = "Save surat pengantar";
+    openModal("taskModal", $("taskNoSpk")); return;
+  }
+  const mcu = kind === "mcu";
+  $("taskSummary").innerHTML = mcu ? `<div><small>MCU requested</small><b>${esc(task.dateLabel || "—")}</b></div>` : `<div><small>Psikotest</small><b>${esc(task.dateLabel || "—")}</b></div>${task.testType ? `<span class="days-chip neutral">${esc(task.testType)}</span>` : ""}${task.service ? `<span class="days-chip neutral">${esc(task.service)}</span>` : ""}`;
+  $("taskBody").innerHTML = `<div class="copy-list">${mcu ? copyRow("Nama Lengkap", task.name) + copyRow("Business Unit", task.businessUnit !== "—" ? task.businessUnit : "") : copyRow("Name", task.name) + copyRow("Job Title", task.position !== "—" ? task.position : "") + copyRow("Business Unit", task.businessUnit !== "—" ? task.businessUnit : "") + copyRow("Assessment Type", task.testType) + copyRow("Assesment", task.service) + copyRow("Psychological Test Location", task.location) + copyRow("Psychological Test Date", task.dateLabel)}</div>`;
+  $("taskPrimary").innerHTML = svgIcon("external-link", 14) + (mcu ? "Open MCU form" : "Open invitation form");
+  openModal("taskModal", $("taskPrimary"));
+}
+function closeTask() { closeModal("taskModal"); state.task = null; }
+async function submitTask(e) {
+  e.preventDefault(); const task = state.task, btn = $("taskPrimary"), err = $("taskError"); if (!task) return;
+  if (task.kind !== "spk") {
+    // Invitation and MCU are Google Forms; the sheet fills itself once the form is submitted.
+    const url = formUrl(task.kind === "mcu" ? "mcu" : "psikotest", { name: task.name, position: task.position !== "—" ? task.position : "", businessUnit: task.businessUnit !== "—" ? task.businessUnit : "", type: task.testType, service: task.service, location: task.location, date: task.dateIso });
+    if (url) window.open(url, "_blank", "noopener"); else toast("The form link is not configured.", "warning");
+    return;
+  }
+  const values = { date: $("taskBody").querySelector('input[name="date"]').value, noSpk: $("taskNoSpk").value.trim(), location: $("taskLocation").value, link: $("taskLink").value.trim() };
+  // Only what actually changed is sent, so cells that already hold the same value are not rewritten.
+  const current = task.current || {}, changed = {}; if (values.date !== (current.dateIso || "")) changed.date = values.date; ["noSpk", "location", "link"].forEach(key => { if (values[key] !== (current[key] || "")) changed[key] = values[key]; });
+  err.hidden = true;
+  const problem = !values.noSpk ? ["Enter the NO SPK.", "taskNoSpk"] : !values.link ? ["Paste the link to the surat pengantar.", "taskLink"] : !/^https?:\/\/\S+$/i.test(values.link) ? ["The SPK link must start with http:// or https://", "taskLink"] : null;
+  if (problem) { err.textContent = problem[0]; err.hidden = false; $(problem[1]).focus(); return; }
+  setBusy(btn, true, "Saving…");
+  try { await api("/.netlify/functions/spk", { method: "POST", body: JSON.stringify({ rowNumber: task.spkRow, name: task.name, values: changed }) }); const name = task.name; closeTask(); toast(`Surat pengantar saved for ${name}.`, "success"); loadDashboard(true, true); }
+  catch (error) { err.textContent = error.message; err.hidden = false; }
+  finally { setBusy(btn, false, "Save surat pengantar"); }
 }
 
 /* ---------- Local (client-side) table sort: Organization + Users ---------- */
@@ -1130,6 +1253,7 @@ const ICONS = {
   "ban": `<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>`,
   "pencil": `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>`,
   "trash": `<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>`,
+  "copy": `<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`,
   "send": `<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`,
   "more": `<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>`,
   "undo": `<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>`,
