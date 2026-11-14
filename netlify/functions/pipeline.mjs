@@ -1,6 +1,6 @@
 import { json, bodyOf } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
-import { FORMS, REQUEST_OPTIONS, requestLine, parseRequests } from "./_lib/requests.mjs";
+import { FORMS, REQUEST_OPTIONS, requestLine, parseRequests, isDropped } from "./_lib/requests.mjs";
 import { readManyTabsFromSpreadsheet, getSheetRowFormulas, getSheetCrudMetadata, writeSheetValues, clearSheetValues, addActivity, inferColumnMeta, toIsoDate, ensureSheetRowExists, copyFormulaColumnsFromPrevious, getSheetMerges, mergeAt, mergeLabel } from "./_lib/sheets.mjs";
 
 // Hiring Pipeline: a stage view over the recruitment pipeline tab.
@@ -143,7 +143,7 @@ async function sendToPipeline(actor, body){
   const source = rfp.rows.find(r => r.rowNumber === rfpRow);
   if (!source || String(source.row[rfp.col("RFP Code")] ?? "").trim() !== code) return json(409, { error:"This row no longer matches the RFP you selected (the sheet was changed). Refresh and try again." });
   // A row whose candidate failed is history; only a live row blocks sending the same RFP again.
-  const existing = records.find(r => String(r.row[cols.info.code] ?? "").trim() === code && !isFailed(r.row[cols.outcome]));
+  const existing = records.find(r => String(r.row[cols.info.code] ?? "").trim() === code && !isDropped(r.row[cols.outcome]));
   if (existing) return json(409, { error:`${code} is already in ${TAB} (row ${existing.rowNumber}).`, rowNumber: existing.rowNumber });
   const candidate = String(body.candidate ?? "").trim().replace(/\s+/g, " ");
   if (candidate.length > 120) return json(400, { error:"Keep the candidate's name under 120 characters." });
@@ -176,9 +176,9 @@ export const handler = async event => {
       const today = Date.now(), counts = new Map(), cards = [];
       // Earlier candidates that failed for the same RFP, and the codes that still have a live row.
       const failedByCode = new Map(), liveCodes = new Set();
-      for (const { row } of records) { const c = text(row, cols.info.code); if (!c) continue; if (isFailed(text(row, cols.outcome))) failedByCode.set(c, (failedByCode.get(c) || 0) + 1); else liveCodes.add(c); }
+      for (const { row } of records) { const c = text(row, cols.info.code); if (!c) continue; if (isDropped(text(row, cols.outcome))) failedByCode.set(c, (failedByCode.get(c) || 0) + 1); else liveCodes.add(c); }
       for (const { row, rowNumber } of records) {
-        const status = text(row, cols.status), outcome = text(row, cols.outcome), failed = isFailed(outcome), group = failed ? "failed" : statusGroup(status);
+        const status = text(row, cols.status), outcome = text(row, cols.outcome), failed = isDropped(outcome), group = failed ? "failed" : statusGroup(status);
         counts.set(status, (counts.get(status) || 0) + 1);
         if (group === "other") continue;
         const stages = {}; let current = null;
@@ -249,7 +249,7 @@ export const handler = async event => {
 
     if (body.action === "clearRequest") {
       // A finished Psikotest or MCU request: remove its line(s) from Remarks and keep every other line as it is.
-      const kind = body.kind === "mcu" ? "MCU" : body.kind === "psikotest" ? "Psikotest" : null, index = cols.info.remarks;
+      const kind = body.kind === "mcu" ? "MCU" : body.kind === "psikotest" ? "Psikotest" : body.kind === "onboarding" ? "Onboarding" : null, index = cols.info.remarks;
       if (!kind || index < 0) return json(400, { error:"Unknown request." });
       const lines = String(live[index] ?? "").split(/\r?\n/), kept = lines.filter(line => !line.trim().startsWith(`[${kind} `) && !(kind === "Psikotest" && line.trim().startsWith("[SPK ")));
       if (kept.length === lines.length) return json(200, { success:true, rowNumber, unchanged:true });
@@ -278,10 +278,11 @@ export const handler = async event => {
 
     if (body.action === "request") {
       // Psikotest or MCU request: one dated line in Remarks. The stage columns themselves are formulas fed by the SPK and MCU tabs.
-      const kind = body.kind === "mcu" ? "mcu" : body.kind === "psikotest" ? "psikotest" : null;
+      const kind = ["mcu", "psikotest", "onboarding"].includes(body.kind) ? body.kind : null;
       if (!kind) return json(400, { error:"Unknown request." });
-      if (isFailed(live[cols.outcome])) return json(409, { error:"This candidate is marked as failed." });
-      if (statusGroup(liveStatus) === "completed") return json(409, { error:"This request is already completed." });
+      if (isDropped(live[cols.outcome])) return json(409, { error:"This candidate is no longer in the running." });
+      // The onboarding guide is sent around the join date, when the request may already be completed.
+      if (kind !== "onboarding" && statusGroup(liveStatus) === "completed") return json(409, { error:"This request is already completed." });
       const date = String(body.date ?? "").trim(), location = String(body.location ?? "").trim(), testType = String(body.testType ?? "").trim(), service = String(body.service ?? "").trim();
       if (!validIso(date)) return json(400, { error:"Pick a valid date." });
       if (kind === "psikotest") {
@@ -290,7 +291,7 @@ export const handler = async event => {
         if (!REQUEST_OPTIONS.services.includes(service)) return json(400, { error:"Choose Standard or Quick." });
       }
       await writeSheetValues(MAIN_ID, [remarksWrite(cols, rowNumber, live, requestLine(kind, { date, location, testType, service }))]);
-      await logActivity(actor, code, kind === "mcu" ? `${code}: MCU requested` : `${code}: psikotest requested (${testType}, ${service})`);
+      await logActivity(actor, code, kind === "onboarding" ? `${code}: onboarding guide marked as sent` : kind === "mcu" ? `${code}: MCU requested` : `${code}: psikotest requested (${testType}, ${service})`);
       return json(200, { success:true, rowNumber, kind });
     }
 

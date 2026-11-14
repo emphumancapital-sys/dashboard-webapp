@@ -65,15 +65,11 @@ function bindEvents() {
   $("taskBody").addEventListener("click", e => { const b = e.target.closest("[data-copy]"); if (b && navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(() => toast("Copied.", "info", { duration: 1400 }), () => {}); });
   $("taskPipeline").addEventListener("click", () => { const row = state.task?.pipelineRow; closeTask(); if (!row) return; state.pipe.openAfterLoad = row; navigate("hiring"); });
   $("scheduleList").addEventListener("click", e => { const b = e.target.closest("[data-schedule]"); if (b) openScheduleDetail(Number(b.dataset.schedule)); });
-  // Jump from a schedule entry to the same request on the board.
-  $("scheduleOpen").addEventListener("click", () => {
-    const item = state.scheduleItem; closeScheduleDetail(); if (!item) return;
-    if (item.source === "pipeline") { state.pipe.openAfterLoad = item.rowNumber; navigate("hiring"); return; }
-    // Psikotest and MCU live in their own tabs: open that table, filtered to this person.
-    if (!state.sources.some(x => x.id === item.source)) { toast(`${item.sourceTab} is not available in the data list.`, "warning"); return; }
-    document.getElementById("masterDataNavGroup").classList.remove("closed"); navigate("data", item.source);
-    if (item.candidate) { $("dataSearch").value = item.candidate; $("dataSearchClear").hidden = false; state.dataPage = 1; loadSourceData(); }
-  });
+  $("scheduleOpen").addEventListener("click", () => state.info?.primary?.run());
+  $("scheduleSecond").addEventListener("click", () => state.info?.second?.run());
+  $("rfpView").addEventListener("click", e => { const b = e.target.closest("[data-view]"); if (!b) return; state.rfpView = b.dataset.view; renderOpenRfps(); });
+  $("rfpList").addEventListener("click", e => { const b = e.target.closest("[data-rfp]"); if (b) openRfpDetail(Number(b.dataset.rfp)); });
+  $("joinerList").addEventListener("click", e => { const b = e.target.closest("[data-joiner]"); if (b) openJoinerDetail(Number(b.dataset.joiner)); });
   $("sendForm").addEventListener("submit", submitSend);
   $("contractSent").addEventListener("click", () => setContractStatus(state.contractRow, "sent", true));
   $("contractResign").addEventListener("click", () => setContractStatus(state.contractRow, "resign", true));
@@ -185,6 +181,7 @@ function navigate(page, sourceId = null) {
   }
   else if (page === "organization") { $("breadcrumbCurrent").textContent = "Organization"; loadOrganization(); }
   else if (page === "hiring") { $("breadcrumbCurrent").textContent = "Hiring Pipeline"; loadPipeline(); }
+  else if (page === "talent") $("breadcrumbCurrent").textContent = "Talent Database";
   else { $("breadcrumbCurrent").textContent = "Overview"; if (state.dashboard) loadDashboard(); }
   $("sidebar").classList.remove("open");
   if (page === "users") loadUsers();
@@ -211,11 +208,8 @@ function renderDashboard(d) {
   $("metricExtensionCaption").textContent = `${fmt(completion.extensionCompleted)} completed · ${pct(completion.extension)} completion`;
   const exits = d.movementCounts || {};
   $("yearCaption").textContent = `${fmt(exits.resignation)} resignation · ${fmt(exits.termination)} termination · ${fmt(exits.retirement)} retirement`;
-  $("rfpCount").textContent = (d.rfpAlerts || []).length + " recent records";
   $("lastUpdated").textContent = "Updated " + new Date(d.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  state.dashboard = d; setRequestConfig(d); renderActions(d); clearFinishedRequests(d.cleanup); renderContracts(); renderSchedule(d); renderJoiners(d);
-  $("rfpRows").innerHTML = d.rfpAlerts?.length ? d.rfpAlerts.map(r => `<tr><td><div class="employee-cell"><b>${esc(r.position)}</b><small>${esc(r.rfpCode)}</small></div></td><td>${esc(r.businessUnit)}</td><td>${esc(r.contract)}</td><td>${esc(r.process)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No RFP records received in ${d.currentYear}.</td></tr>`;
-  $("rfpYearCaption").textContent = String(d.currentYear || "");
+  state.dashboard = d; setRequestConfig(d); renderActions(d); clearFinishedRequests(d.cleanup); renderContracts(); renderSchedule(d); renderOpenRfps(); renderJoiners(d);
   renderActivity(d.latestActivities || [], $("latestActivity"), false); renderActivity(d.activityHistory || [], $("historyList"), true);
   const warnings = d.warnings || []; $("warningBox").hidden = !warnings.length; $("warningBox").textContent = warnings.length ? warnings.join(" · ") : "";
   ["metricNewHire", "metricContract", "metricRfp", "metricYear"].forEach(countUp);
@@ -227,14 +221,14 @@ function renderContracts() {
   $("contractCount").textContent = `${overdue ? `${overdue} overdue · ` : ""}${need.length} need action${done ? ` · ${done} done` : ""}`;
   const remaining = contractRemaining;
   $("contractRows").innerHTML = rows.length ? rows.map(r => `<tr class="is-clickable${r.done ? " is-muted" : ""}${r.pending ? " is-pending" : ""}" data-contract="${r.rowNumber}">
-    <td><div class="employee-cell"><b>${esc(r.employee)}</b><small>${esc(r.employeeId)} · ${esc(r.position)}</small></div></td><td>${esc(r.businessUnit)}</td>
+    <td><div class="employee-cell"><b>${esc(r.employee)}</b><small>${esc(r.employeeId)} · ${esc(r.position)}</small>${r.psikotest || r.mcu ? `<div class="reg-flags">${r.psikotest ? `<span class="reg-flag" data-tip="Psikotest: ${escAttr(r.psikotest)}">${svgIcon("check", 10)}Psikotest</span>` : ""}${r.mcu ? `<span class="reg-flag" data-tip="MCU: ${escAttr(r.mcu)}">${svgIcon("check", 10)}MCU</span>` : ""}</div>` : ""}</div></td><td>${esc(r.businessUnit)}</td>
     <td><div class="end-cell"><span class="days-chip ${r.done ? "neutral" : r.daysRemaining <= 30 ? "critical" : r.daysRemaining > 60 ? "safe" : ""}">${esc(remaining(r))}</span><small>${esc(r.endDate)}</small></div></td>
     <td class="col-actions">${r.done ? `<span class="done-chip">${svgIcon("check", 12)}${esc(r.status)}</span>` : `<div class="row-actions"><button type="button" class="row-action good" data-contract-action="sent" data-tip="Mark as sent to C&amp;B" aria-label="Mark ${escAttr(r.employee)} as sent to C&amp;B">${svgIcon("check-circle", 15)}</button><button type="button" class="row-action" data-contract-menu data-tip="Other status" aria-label="Other status for ${escAttr(r.employee)}" aria-haspopup="menu">${svgIcon("more", 15)}</button></div>`}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">${emptyBlock("calendar-clock", "No contracts ending soon")}</td></tr>`;
 }
 function renderJoiners(d) {
   const rows = d.upcomingJoiners || [];
   $("joinerCount").textContent = `${rows.length} joining`; $("joinerCount").hidden = !rows.length;
-  $("joinerList").innerHTML = rows.length ? rows.map(r => `<div class="activity-item"><span class="avatar">${esc(initial(r.name))}</span><div class="activity-copy"><b>${esc(r.name)}</b><small>${esc([r.position, r.businessUnit, r.contract].filter(x => x && x !== "—").join(" · ") || "—")}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span><small>${esc(r.joinDate)}</small></div></div>`).join("") : emptyBlock("user-plus", "No one joining soon");
+  $("joinerList").innerHTML = rows.length ? rows.map(r => `<button type="button" class="activity-item schedule-item" data-joiner="${r.pipelineRow}"><span class="avatar">${esc(initial(r.name || r.position))}</span><div class="activity-copy"><b>${esc(r.name || r.position)}</b><small>${r.guideSent ? `<em class="is-sent">${svgIcon("check", 10)}Guide sent</em>` : `<em class="is-todo">Guide not sent</em>`}${esc([r.name ? r.position : "", r.businessUnit].filter(x => x && x !== "—").map(x => " · " + x).join(""))}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span><small>${esc(r.joinDate)}</small></div>${svgIcon("chevron-right", 14)}</button>`).join("") : emptyBlock("user-plus", "No one joining soon");
 }
 const soonLabel = days => days === 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days`;
 const SCHEDULE_ICON = { interview: "users", offering: "file-signature", psikotest: "file-check", mcu: "heart-pulse" };
@@ -249,14 +243,63 @@ function renderSchedule(d) {
     return `${head}<button type="button" class="activity-item schedule-item" data-schedule="${i}"><span class="schedule-ico is-${r.kind}">${svgIcon(SCHEDULE_ICON[r.kind] || "calendar", 14)}</span><div class="activity-copy"><b>${esc(r.candidate || r.position)}</b><small><em>${esc(r.label)}</em>${esc([r.candidate ? r.position : "", r.businessUnit].filter(x => x && x !== "—").map(x => " · " + x).join(""))}</small></div>${svgIcon("chevron-right", 14)}</button>`;
   }).join("");
 }
+const infoGrid = details => (details || []).map(item => { const wide = item.label.trim().toLowerCase() === "remarks"; return `<div${wide ? ' class="is-wide"' : ""}><dt>${esc(item.label === item.label.toUpperCase() ? headerLabel(item.label) : item.label)}</dt><dd${wide ? ' class="is-multiline"' : ""}>${/^https?:\/\/\S+$/i.test(item.value) ? `<a class="cell-link" href="${escAttr(item.value)}" target="_blank" rel="noopener noreferrer">${svgIcon("external-link", 12)}<span>Open link</span></a>` : esc(item.value)}</dd></div>`; }).join("");
+// One detail dialog for Overview entries: a summary line, the row's filled columns, and up to two actions.
+function openInfo({ kind = "interview", icon = "calendar", title, sub, summary, details, primary, second = null, hint = "" }) {
+  state.info = { primary, second };
+  $("scheduleModalIcon").className = "modal-icon schedule-ico is-" + kind; $("scheduleModalIcon").innerHTML = svgIcon(icon, 17);
+  $("scheduleModalTitle").textContent = title; $("scheduleModalSub").textContent = sub; $("scheduleSummary").innerHTML = summary; $("scheduleInfo").innerHTML = infoGrid(details);
+  $("scheduleHint").textContent = hint; $("scheduleOpen").hidden = !primary; if (primary) $("scheduleOpen").innerHTML = primary.html || esc(primary.label);
+  $("scheduleSecond").hidden = !second; if (second) $("scheduleSecond").innerHTML = second.html || esc(second.label);
+  openModal("scheduleModal", primary ? $("scheduleOpen") : $("cancelScheduleModal"));
+}
+const openOnBoard = rowNumber => { closeScheduleDetail(); state.pipe.openAfterLoad = rowNumber; navigate("hiring"); };
 function openScheduleDetail(index) {
-  const r = (state.dashboard?.upcomingSchedule || [])[index]; if (!r) return; state.scheduleItem = r;
-  $("scheduleOpen").textContent = r.source === "spk" ? "Open in Psychotest (SPK)" : r.source === "mcu" ? "Open in Medical Check Up" : "Open in Hiring Pipeline";
-  $("scheduleModalIcon").className = "modal-icon schedule-ico is-" + r.kind; $("scheduleModalIcon").innerHTML = svgIcon(SCHEDULE_ICON[r.kind] || "calendar", 17);
-  $("scheduleModalTitle").textContent = r.candidate || r.position; $("scheduleModalSub").textContent = [r.candidate && r.position !== "—" ? r.position : "", r.rfpCode, `${r.sourceTab} · Row ${r.rowNumber}`].filter(Boolean).join(" · ");
-  $("scheduleSummary").innerHTML = `<div><small>${esc(r.label)}</small><b>${esc(r.weekday)}, ${esc(r.date)}</b></div><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span>`;
-  $("scheduleInfo").innerHTML = (r.details || []).map(item => `<div${item.label.trim().toLowerCase() === "remarks" ? ' class="is-wide"' : ""}><dt>${esc(item.label === item.label.toUpperCase() ? headerLabel(item.label) : item.label)}</dt><dd${item.label.trim().toLowerCase() === "remarks" ? ' class="is-multiline"' : ""}>${/^https?:\/\/\S+$/i.test(item.value) ? `<a class="cell-link" href="${escAttr(item.value)}" target="_blank" rel="noopener noreferrer">${svgIcon("external-link", 12)}<span>Open link</span></a>` : esc(item.value)}</dd></div>`).join("");
-  openModal("scheduleModal", $("cancelScheduleModal"));
+  const r = (state.dashboard?.upcomingSchedule || [])[index]; if (!r) return;
+  const label = r.source === "spk" ? "Open in Psychotest (SPK)" : r.source === "mcu" ? "Open in Medical Check Up" : "Open in Hiring Pipeline";
+  openInfo({ kind: r.kind, icon: SCHEDULE_ICON[r.kind] || "calendar", title: r.candidate || r.position, sub: [r.candidate && r.position !== "—" ? r.position : "", r.rfpCode, `${r.sourceTab} · Row ${r.rowNumber}`].filter(Boolean).join(" · "),
+    summary: `<div><small>${esc(r.label)}</small><b>${esc(r.weekday)}, ${esc(r.date)}</b></div><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span>`, details: r.details,
+    primary: { label, run: () => {
+      if (r.source === "pipeline") { openOnBoard(r.rowNumber); return; }
+      closeScheduleDetail();
+      // Psikotest and MCU live in their own tabs: open that table, filtered to this person.
+      if (!state.sources.some(x => x.id === r.source)) { toast(`${r.sourceTab} is not available in the data list.`, "warning"); return; }
+      document.getElementById("masterDataNavGroup").classList.remove("closed"); navigate("data", r.source);
+      if (r.candidate) { $("dataSearch").value = r.candidate; $("dataSearchClear").hidden = false; state.dataPage = 1; loadSourceData(); }
+    } } });
+}
+/* Open RFPs: requests still without a candidate, and requests with a candidate that have not reached a join date. */
+function renderOpenRfps() {
+  const data = state.dashboard?.openRfps || {}, need = data.needCandidate || [], process = data.inProcess || [], view = state.rfpView === "process" ? "process" : "need", rows = view === "need" ? need : process;
+  $("rfpNeedCount").textContent = need.length; $("rfpProcessCount").textContent = process.length;
+  $("rfpView").querySelectorAll("[data-view]").forEach(b => { const on = b.dataset.view === view; b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); });
+  $("rfpList").innerHTML = rows.length ? rows.map((r, i) => `<button type="button" class="activity-item schedule-item" data-rfp="${i}"><span class="schedule-ico is-${view === "need" ? "offering" : "interview"}">${svgIcon(view === "need" ? "user-plus" : "workflow", 14)}</span><div class="activity-copy"><b>${esc(view === "need" ? r.position : r.candidate)}</b><small><em>${esc(view === "need" ? (r.rfpCode || "No code") : r.stage)}</em>${esc([view === "need" ? "" : r.position, r.businessUnit].filter(x => x && x !== "—").map(x => " · " + x).join(""))}</small></div>${r.daysOpen === null ? "" : `<div class="joiner-when"><span class="days-chip ${r.daysOpen > 60 ? "critical" : r.daysOpen > 30 ? "" : "neutral"}">${r.daysOpen}d open</span>${view === "need" ? `<small>${esc(r.stage)}</small>` : ""}</div>`}${svgIcon("chevron-right", 14)}</button>`).join("") : emptyBlock(view === "need" ? "user-plus" : "workflow", view === "need" ? "Every open RFP has a candidate" : "No candidates in process");
+}
+function openRfpDetail(index) {
+  const data = state.dashboard?.openRfps || {}, need = state.rfpView !== "process", r = (need ? data.needCandidate : data.inProcess || [])[index]; if (!r) return;
+  openInfo({ kind: need ? "offering" : "interview", icon: need ? "user-plus" : "workflow", title: need ? r.position : r.candidate, sub: [need ? "" : r.position, r.rfpCode, `${r.sourceTab} · Row ${r.rowNumber}`].filter(Boolean).join(" · "),
+    summary: `<div><small>${need ? "Candidate" : "Stage"}</small><b>${esc(need ? "None yet" : r.stage)}</b></div>${r.daysOpen === null ? "" : `<span class="days-chip ${r.daysOpen > 60 ? "critical" : r.daysOpen > 30 ? "" : "neutral"}">${r.daysOpen}d open</span>`}${need && r.source === "rfp" ? `<span class="summary-spacer"></span><span class="days-chip neutral">Not in pipeline</span>` : ""}`, details: r.details,
+    primary: need ? { html: svgIcon("search", 14) + "Find candidate", run: () => { closeScheduleDetail(); navigate("talent"); } } : { label: "Open in Hiring Pipeline", run: () => openOnBoard(r.rowNumber) },
+    second: need && r.source === "pipeline" ? { label: "Open in Hiring Pipeline", run: () => openOnBoard(r.rowNumber) } : null });
+}
+/* Joining Soon: from the pipeline's Join Date. Each entry carries the onboarding guide task. */
+function onboardingMailUrl(r) { const o = state.dashboard?.onboarding || {}; return o.mailUrl ? `${o.mailUrl.replace(/\/$/, "")}/?view=compose&subject=${encodeURIComponent(`${o.subject || "Onboarding Guide"} - ${r.name || r.position}`)}` : ""; }
+function openJoinerDetail(pipelineRow) {
+  const r = (state.dashboard?.upcomingJoiners || []).find(x => x.pipelineRow === pipelineRow); if (!r) return; const o = state.dashboard?.onboarding || {};
+  openInfo({ kind: "mcu", icon: "user-plus", title: r.name || r.position, sub: [r.name && r.position !== "—" ? r.position : "", r.rfpCode, `Row ${r.pipelineRow}`].filter(Boolean).join(" · "),
+    summary: `<div><small>Join date</small><b>${esc(r.weekday)}, ${esc(r.joinDate)}</b></div><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span><span class="summary-spacer"></span>${r.guideSent ? `<span class="done-chip">${svgIcon("check", 12)}Onboarding Guide sent ${esc(r.guideSent)}</span>` : `<span class="days-chip">Onboarding Guide not sent</span>`}`, details: r.details,
+    hint: o.account ? `Sign in to Zimbra as ${o.account}` : "",
+    primary: { html: svgIcon("mail", 14) + "Send Onboarding Guide", run: () => { const url = onboardingMailUrl(r); if (url) window.open(url, "_blank", "noopener"); else toast("The mail link is not configured.", "warning"); } },
+    second: r.guideSent ? null : { html: svgIcon("check", 14) + "Mark as sent", run: () => markGuideSent(r) } });
+}
+async function markGuideSent(r) {
+  const btn = $("scheduleSecond"); btn.disabled = true;
+  try {
+    const today = isoOf(new Date()); await api(PIPE_API, { method: "POST", body: JSON.stringify({ action: "request", kind: "onboarding", rowNumber: r.pipelineRow, code: r.rfpCode, date: today }) });
+    r.guideSent = formatDate(today); if (state.dashboard) state.dashboard.actions = (state.dashboard.actions || []).filter(a => !(a.kind === "onboarding" && a.pipelineRow === r.pipelineRow));
+    renderJoiners(state.dashboard); renderActions(state.dashboard); toast(`Onboarding Guide marked as sent for ${r.name || r.position}.`, "success"); openJoinerDetail(r.pipelineRow);
+  } catch (error) { toast(error.message, "error"); }
+  finally { btn.disabled = false; }
 }
 function closeScheduleDetail() { closeModal("scheduleModal"); }
 function openContractMenu(button, rowNumber) {
@@ -945,15 +988,16 @@ async function clearFinishedRequests(list) {
   // A letter that was just copied into SPK 2026 changes what is still open.
   if (changed && list.some(item => item.sync) && $("page-overview").classList.contains("active")) loadDashboard(true, true);
 }
-const TASK_ICON = { invite: "file-check", spk: "file-signature", mcu: "heart-pulse" }, TASK_KIND = { invite: "psikotest", spk: "offering", mcu: "mcu" };
+const TASK_ICON = { invite: "file-check", spk: "file-signature", mcu: "heart-pulse", onboarding: "mail" }, TASK_KIND = { invite: "psikotest", spk: "offering", mcu: "mcu", onboarding: "interview" };
 function renderActions(d) {
   const rows = d.actions || [];
   $("actionCount").textContent = `${rows.length} to do`; $("actionCount").hidden = !rows.length;
-  $("actionList").innerHTML = rows.length ? rows.map((r, i) => `<button type="button" class="activity-item schedule-item" data-action-index="${i}"><span class="schedule-ico is-${TASK_KIND[r.kind]}">${svgIcon(TASK_ICON[r.kind], 14)}</span><div class="activity-copy"><b>${esc(r.title)}</b><small><em>${esc(r.name || "No candidate name")}</em>${esc([r.position, r.businessUnit].filter(x => x && x !== "—").map(x => " · " + x).join(""))}</small></div>${r.dateLabel ? `<div class="joiner-when"><span class="days-chip ${r.daysUntil !== null && r.daysUntil <= 3 ? "critical" : "neutral"}">${r.kind === "mcu" ? "Requested" : r.daysUntil === null ? "Test" : r.daysUntil < 0 ? `${-r.daysUntil}d ago` : soonLabel(r.daysUntil)}</span><small>${esc(r.dateLabel)}</small></div>` : ""}${svgIcon("chevron-right", 14)}</button>`).join("") : `<div class="action-empty">${svgIcon("check-circle", 15)}Nothing needs your action</div>`;
+  $("actionList").innerHTML = rows.length ? rows.map((r, i) => `<button type="button" class="activity-item schedule-item" data-action-index="${i}"><span class="schedule-ico is-${TASK_KIND[r.kind]}">${svgIcon(TASK_ICON[r.kind], 14)}</span><div class="activity-copy"><b>${esc(r.title)}</b><small><em>${esc(r.name || "No candidate name")}</em>${esc([r.position, r.businessUnit].filter(x => x && x !== "—").map(x => " · " + x).join(""))}</small></div>${r.dateLabel ? `<div class="joiner-when"><span class="days-chip ${r.daysUntil !== null && r.daysUntil <= 3 ? "critical" : "neutral"}">${r.kind === "onboarding" ? `Joins ${soonLabel(r.daysUntil).toLowerCase()}` : r.kind === "mcu" ? "Requested" : r.daysUntil === null ? "Test" : r.daysUntil < 0 ? `${-r.daysUntil}d ago` : soonLabel(r.daysUntil)}</span><small>${esc(r.dateLabel)}</small></div>` : ""}${svgIcon("chevron-right", 14)}</button>`).join("") : `<div class="action-empty">${svgIcon("check-circle", 15)}Nothing needs your action</div>`;
 }
 const copyRow = (label, value) => `<div class="copy-row"><span>${esc(label)}</span><b>${esc(value || "—")}</b>${value ? `<button type="button" class="row-action" data-copy="${escAttr(value)}" data-tip="Copy" aria-label="Copy ${escAttr(label)}">${svgIcon("copy", 13)}</button>` : "<i></i>"}</div>`;
 function openTask(task) {
-  if (!task) return; state.task = task; const kind = task.kind;
+  if (!task) return; if (task.kind === "onboarding") { openJoinerDetail(task.pipelineRow); return; }
+  state.task = task; const kind = task.kind;
   $("taskIcon").className = "modal-icon schedule-ico is-" + TASK_KIND[kind]; $("taskIcon").innerHTML = svgIcon(TASK_ICON[kind], 17);
   $("taskTitle").textContent = task.title; $("taskSub").textContent = [task.name, task.position !== "—" ? task.position : "", task.rfpCode].filter(Boolean).join(" · ");
   $("taskError").hidden = true; $("taskPipeline").hidden = !task.pipelineRow || !!task.onBoard;
@@ -1276,6 +1320,7 @@ const ICONS = {
   "ban": `<circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/>`,
   "pencil": `<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>`,
   "trash": `<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>`,
+  "mail": `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>`,
   "copy": `<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`,
   "send": `<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>`,
   "more": `<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>`,

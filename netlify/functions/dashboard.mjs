@@ -1,7 +1,7 @@
 import { json } from "./_lib/http.mjs";
 import { requireAdmin } from "./_lib/auth.mjs";
 import { readManyTabsFromSpreadsheet, listActivity } from "./_lib/sheets.mjs";
-import { FORMS, REQUEST_OPTIONS, parseRequests, personKey } from "./_lib/requests.mjs";
+import { FORMS, REQUEST_OPTIONS, ONBOARDING, parseRequests, personKey, isDropped } from "./_lib/requests.mjs";
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID || "17Iz_3lQyCkYLR5E-MyKkyQ_j21Qwda2zaUJf_CW2VYk";
 const TABS = [
@@ -91,12 +91,6 @@ export const handler = async event => {
       .sort((a,b)=>Number(a.done)-Number(b.done)||a.daysRemaining-b.daysRemaining);
     const contractAlerts=contractAll.slice(0,100);
 
-    // People joining in the next 7 days (New Hire 2026). Information only.
-    const nhJoin=col(newHire.headers,"Join Date"),nhName=col(newHire.headers,"Name"),nhPosition=col(newHire.headers,"Position"),nhBU=col(newHire.headers,"Business Unit"),nhContract=col(newHire.headers,"Contract"),nhId=col(newHire.headers,"ID");
-    const upcomingJoiners=newHire.rows.map(row=>({row,date:parseDate(val(row,nhJoin))})).filter(item=>item.date).map(({row,date})=>({
-      name:String(val(row,nhName)||"—"),employeeId:String(val(row,nhId)||""),position:String(val(row,nhPosition)||"—"),businessUnit:String(val(row,nhBU)||"—"),contract:String(val(row,nhContract)||""),joinDate:dateLabel(date),daysUntil:Math.ceil((date-today)/86400000)
-    })).filter(item=>item.daysUntil>=0&&item.daysUntil<=JOIN_WINDOW_DAYS).sort((a,b)=>a.daysUntil-b.daysUntil||a.name.localeCompare(b.name)).slice(0,50);
-
     // Upcoming schedule: every dated pipeline step in the next 14 days (2026 Rec Pipeline), for requests still running.
     const pipeValues=data.get("rfp")?.values||[];
     const ivCode=col(rfp.headers,"RFP Code"),ivPosition=col(rfp.headers,"Position"),ivBU=col(rfp.headers,"Business Unit"),ivCandidate=col(rfp.headers,"Candidates"),ivProcess=col(rfp.headers,"RFP Process"),ivOutcome=col(rfp.headers,"Status");
@@ -104,7 +98,7 @@ export const handler = async event => {
     const upcomingSchedule=[],scheduleWarnings=[];
     pipeValues.slice(1).forEach((row,index)=>{
       if(![0,5].some(i=>row[i]!==undefined&&row[i]!==null&&row[i]!==""))return;
-      if(/fail|gagal/i.test(String(val(row,ivOutcome)))||/complet|done|closed|selesai|cancel/i.test(String(val(row,ivProcess))))return;
+      if(isDropped(val(row,ivOutcome))||/complet|done|closed|selesai|cancel/i.test(String(val(row,ivProcess))))return;
       for(const [header,kind,label] of SCHEDULE_STEPS){
         const date=parseDate(val(row,col(rfp.headers,header)));if(!date)continue;
         const daysUntil=Math.ceil((date-today)/86400000);if(daysUntil<0||daysUntil>SCHEDULE_WINDOW_DAYS)continue;
@@ -143,7 +137,7 @@ export const handler = async event => {
     const requestByName=new Map();
     pipeValues.slice(1).forEach((row,index)=>{
       if(![0,5].some(i=>row[i]!==undefined&&row[i]!==null&&row[i]!==""))return;
-      if(/fail|gagal/i.test(String(val(row,ivOutcome)))||/complet|done|closed|selesai|cancel/i.test(String(val(row,ivProcess))))return;
+      if(isDropped(val(row,ivOutcome))||/complet|done|closed|selesai|cancel/i.test(String(val(row,ivProcess))))return;
       const requests=parseRequests(val(row,ivRemarks));if(!requests.psikotest&&!requests.mcu)return;
       const candidate=String(val(row,ivCandidate)||"").trim(),key=personKey(candidate);
       const base={pipelineRow:2+index,name:candidate,position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),rfpCode:String(val(row,ivCode)||"")};
@@ -179,7 +173,62 @@ export const handler = async event => {
         current:{dateIso:letterDate?`${letterDate.getFullYear()}-${String(letterDate.getMonth()+1).padStart(2,"0")}-${String(letterDate.getDate()).padStart(2,"0")}`:"",noSpk:filled(row[spkCols.no])?String(row[spkCols.no]).trim():"",location:filled(row[spkCols.location])?String(row[spkCols.location]).trim():"",link:filled(row[spkCols.link])?String(row[spkCols.link]).trim():""},suggestedLocation:request.location||"",
         details:spkTab.headers.map((label,i)=>({label,value:String(row[i]??"").trim()})).filter(item=>item.label&&!blank(item.value))});
     }
-    const actionOrder={spk:0,invite:1,mcu:2};
+    const rowDetails=(headers,row)=>headers.map((label,i)=>({label,value:String(row[i]??"").trim()})).filter(item=>item.label&&!blank(item.value));
+    const pipeRows=pipeValues.slice(1).map((row,index)=>({row,rowNumber:2+index})).filter(({row})=>[0,5].some(i=>row[i]!==undefined&&row[i]!==null&&row[i]!==""));
+    const ivJoin=col(rfp.headers,"Join Date"),ivDept=col(rfp.headers,"Department"),ivReceived=col(rfp.headers,"RFP Received");
+    const closedProcess=value=>/complet|done|closed|selesai|cancel/i.test(String(value??""));
+    const daysSince=value=>{const date=parseDate(dateOnly(value));return date?Math.max(0,Math.floor((today-date)/86400000)):null;};
+
+    // Joining Soon: pipeline rows whose Join Date (column AD) falls in the next 7 days. The onboarding guide is the task attached to it.
+    const upcomingJoiners=[];
+    for(const {row,rowNumber} of pipeRows){
+      if(isDropped(val(row,ivOutcome))||/cancel/i.test(String(val(row,ivProcess))))continue;
+      const date=parseDate(dateOnly(val(row,ivJoin)));if(!date)continue;
+      const daysUntil=Math.ceil((date-today)/86400000),sent=parseRequests(val(row,ivRemarks)).onboarding||null,code=String(val(row,ivCode)||"");
+      // After the join date the "guide sent" note has done its job and is removed from Remarks.
+      if(daysUntil<0){if(sent)cleanup.push({pipelineRow:rowNumber,code,kind:"onboarding"});continue;}
+      if(daysUntil>JOIN_WINDOW_DAYS)continue;
+      const item={pipelineRow:rowNumber,rfpCode:code,name:String(val(row,ivCandidate)||"").trim(),position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),joinDate:dateLabel(date),weekday:date.toLocaleDateString("en-GB",{weekday:"short"}),daysUntil,guideSent:sent?sent.dateLabel:"",details:rowDetails(rfp.headers,row)};
+      upcomingJoiners.push(item);
+      if(!sent)actions.push({kind:"onboarding",title:"Send Onboarding Guide",pipelineRow:rowNumber,rfpCode:code,name:item.name,position:item.position,businessUnit:item.businessUnit,dateLabel:item.joinDate,daysUntil});
+    }
+    upcomingJoiners.sort((a,b)=>a.daysUntil-b.daysUntil||String(a.name||a.position).localeCompare(String(b.name||b.position)));
+
+    // Open RFPs: (1) still without a candidate, (2) with a candidate but not yet at a join date. Dropped candidates are left out.
+    const stageOf=row=>{let label="Sourcing";for(const [header,name] of [["1st Intv","1st Interview"],["2nd Intv","2nd Interview"],["Offering In","Offering In"],["Offering Done","Offering Done"],["Psychological Test","Psikotest"],["MCU","MCU"]]){if(!blank(val(row,col(rfp.headers,header))))label=name;}return label;};
+    const needCandidate=[],inProcess=[],liveCodes=new Set();
+    for(const {row,rowNumber} of pipeRows){
+      const code=String(val(row,ivCode)||"").trim();
+      if(isDropped(val(row,ivOutcome)))continue;
+      if(code)liveCodes.add(code);
+      if(closedProcess(val(row,ivProcess)))continue;
+      const candidate=String(val(row,ivCandidate)||"").trim();
+      const item={source:"pipeline",sourceTab:"2026 Rec Pipeline",rowNumber,rfpCode:code,position:String(val(row,ivPosition)||"—"),businessUnit:String(val(row,ivBU)||"—"),department:String(val(row,ivDept)||"").trim(),candidate,stage:stageOf(row),received:String(val(row,ivReceived)||"").trim(),daysOpen:daysSince(val(row,ivReceived)),details:rowDetails(rfp.headers,row)};
+      if(blank(candidate))needCandidate.push(item);
+      else if(blank(val(row,ivJoin)))inProcess.push(item);
+    }
+    // RFPs that are in the intake tab but have no live row in the pipeline yet also need a candidate.
+    try{
+      const intake=(await readManyTabsFromSpreadsheet(SPREADSHEET_ID,[{key:"intake",title:"RFP 2026",headerRow:1,startColumn:"A",endColumn:"S"}],{forceRefresh:event.queryStringParameters?.refresh==="1"})).get("intake")?.values||[];
+      const headers=(intake[0]||[]).map(value=>String(value??"").trim()),at=name=>col(headers,name);
+      intake.slice(1).forEach((row,index)=>{
+        const code=String(val(row,at("RFP Code"))||"").trim();if(blank(code)||liveCodes.has(code)||closedProcess(val(row,at("Process RFP"))))return;
+        needCandidate.push({source:"rfp",sourceTab:"RFP 2026",rowNumber:2+index,rfpCode:code,position:String(val(row,at("Position"))||"—"),businessUnit:String(val(row,at("Business Unit"))||"—"),department:String(val(row,at("Department"))||"").trim(),candidate:"",stage:"Not in pipeline",received:String(val(row,at("RFP Received"))||"").trim(),daysOpen:daysSince(val(row,at("RFP Received"))),details:rowDetails(headers,row)});
+      });
+    }catch(error){scheduleWarnings.push(`RFP 2026 could not be read for the open RFP list: ${error.message||"unknown error"}`);}
+    const oldestFirst=(a,b)=>(b.daysOpen??-1)-(a.daysOpen??-1)||a.position.localeCompare(b.position);
+    needCandidate.sort(oldestFirst);inProcess.sort(oldestFirst);
+
+    // Contract reminders: mark people already registered for psikotest or MCU (the tab's own columns first, then the SPK and MCU tabs by name).
+    const extPsiko=col(extension.headers,"PSIKOTEST"),extMcu=col(extension.headers,"MCU");
+    for(const item of contractAll){
+      const row=extValues[item.rowNumber-2]||[],key=personKey(item.employee);
+      const spkHit=key&&spkCols?spkRows.filter(x=>personKey(x.row[spkCols.name])===key).pop():null,mcuHit=key?mcuRows.find(x=>x.key===key):null;
+      item.psikotest=!blank(val(row,extPsiko))?String(val(row,extPsiko)).trim():spkHit?(String(val(spkHit.row,spkCols.test)||"").trim()||"Registered"):"";
+      item.mcu=!blank(val(row,extMcu))?String(val(row,extMcu)).trim():mcuHit?(mcuHit.date?dateLabel(mcuHit.date):"Registered"):"";
+    }
+
+    const actionOrder={spk:0,invite:1,mcu:2,onboarding:3};
     actions.sort((a,b)=>(a.daysUntil??999)-(b.daysUntil??999)||actionOrder[a.kind]-actionOrder[b.kind]||a.name.localeCompare(b.name));
 
     const stepOrder=["1st Interview","2nd Interview","Offering In","Offering Done","Psikotest","MCU"];
@@ -203,7 +252,7 @@ export const handler = async event => {
       },
       completion:{rfp:dashboardMetrics.rfpRate,newHire:dashboardMetrics.newHireRate,extension:dashboardMetrics.extensionRate,rfpCompleted:dashboardMetrics.rfpCompleted,newHireCompleted:dashboardMetrics.newHireCompleted,extensionCompleted:dashboardMetrics.extensionCompleted},
       contractAlerts,contractSummary:{needAction:contractAll.filter(x=>!x.done).length,overdue:contractAll.filter(x=>x.state==="overdue").length,done:contractAll.filter(x=>x.done).length,windowDays:CONTRACT_WINDOW_DAYS},
-      upcomingJoiners,joinWindowDays:JOIN_WINDOW_DAYS,actions:actions.slice(0,100),cleanup:cleanup.slice(0,20),forms:FORMS,requestOptions:REQUEST_OPTIONS,upcomingSchedule:upcomingSchedule.slice(0,80),scheduleWindowDays:SCHEDULE_WINDOW_DAYS,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
+      upcomingJoiners:upcomingJoiners.slice(0,50),joinWindowDays:JOIN_WINDOW_DAYS,onboarding:ONBOARDING,openRfps:{needCandidate:needCandidate.slice(0,100),inProcess:inProcess.slice(0,100)},actions:actions.slice(0,100),cleanup:cleanup.slice(0,20),forms:FORMS,requestOptions:REQUEST_OPTIONS,upcomingSchedule:upcomingSchedule.slice(0,80),scheduleWindowDays:SCHEDULE_WINDOW_DAYS,rfpAlerts:rfpRecent,movementCounts:{...movementCounts,resignation:dashboardMetrics.resignation||movementCounts.resignation,termination:dashboardMetrics.termination||movementCounts.termination,retirement:dashboardMetrics.retirement||movementCounts.retirement},
       latestActivities:activities.slice(0,5),activityHistory:activities,warnings,
       dataBasis:{rfp:"2026 Rec Pipeline",newHire:"New Hire 2026",extension:"Extend 2026",employees:"Data Valid Employees",movement:"New Hire vs Exit",tpc:"2026 TPC Pipeline"}
     });

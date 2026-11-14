@@ -55,3 +55,20 @@ Built on the v10 build. Adds `netlify/functions/contracts.mjs`, changes `dashboa
 - Entries are grouped by day (Today, Tomorrow, In N days) and show the candidate (or the position when no candidate is filled), the step, position and business unit.
 - Pipeline rows whose `Status` is Failed or whose `RFP Process` is completed or cancelled are left out. Psikotest and MCU rows are not filtered by status. A cell that does not hold a date is skipped.
 - Clicking an entry opens a dialog with the step, its date and every filled column of that row. For pipeline entries, "Open in Hiring Pipeline" jumps to the same request's card details on the board. For Psikotest and MCU entries the button opens that tab's table, filtered to the person.
+
+## Overview, later additions
+### Registered marks on contract rows
+- A contract row shows a "Psikotest" and/or "MCU" mark when the person is already registered. The mark comes from the row's own `PSIKOTEST` and `MCU` columns in `Extend 2026`; if those are empty, from a row with the same name in `SPK 2026` or `MCU 2026`. Hovering shows the value.
+
+### Open RFPs (replaces Latest RFP Records)
+- **No candidate**: pipeline rows that are still running and have an empty `Candidates` cell, plus RFPs in `RFP 2026` that have no live row in the pipeline yet.
+- **In process**: pipeline rows with a candidate and no `Join Date`.
+- Left out of both: rows whose `Status` is Withdraw, Failed or New Job, and rows whose `RFP Process` is completed or cancelled.
+- Each entry opens its details. "Find candidate" goes to the new Talent Database page, which is a placeholder for now. "Open in Hiring Pipeline" opens the card.
+- On the board, rows with Status Withdraw or New Job are now treated like Failed: they leave the board and appear in the Failed list. The app itself still only writes `Failed`.
+
+### Joining Soon and the onboarding guide
+- Source is now the pipeline's `Join Date` (column AD), today through the next 7 days, instead of `New Hire 2026`.
+- Each entry opens its details. "Send Onboarding Guide" opens Zimbra (`https://mail.emp.id`) on the compose screen with the subject filled in; the dialog names the mailbox to sign in with. The app never handles the password and does not send the email itself.
+- "Mark as sent" records `[Onboarding 14 Nov 2026] Guide sent` in the row's Remarks. The entry then shows "Guide sent", and the task leaves Action Needed. The line is removed from Remarks after the join date has passed.
+- Unsent guides for the next 7 days are also listed in Action Needed.
