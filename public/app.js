@@ -56,6 +56,10 @@ function bindEvents() {
   bindModal("outcomeModal", closeOutcomeDialog, ["closeOutcomeModal", "cancelOutcomeModal"]);
   bindModal("contractModal", closeContractDetail, ["closeContractModal", "cancelContractModal"]);
   bindModal("sendModal", closeSendDialog, ["closeSendModal", "cancelSendModal"]);
+  bindModal("scheduleModal", closeScheduleDetail, ["closeScheduleModal", "cancelScheduleModal"]);
+  $("scheduleList").addEventListener("click", e => { const b = e.target.closest("[data-schedule]"); if (b) openScheduleDetail(Number(b.dataset.schedule)); });
+  // Jump from a schedule entry to the same request on the board.
+  $("scheduleOpen").addEventListener("click", () => { const rowNumber = state.scheduleRow; closeScheduleDetail(); state.pipe.openAfterLoad = rowNumber; navigate("hiring"); });
   $("sendForm").addEventListener("submit", submitSend);
   $("contractSent").addEventListener("click", () => setContractStatus(state.contractRow, "sent", true));
   $("contractResign").addEventListener("click", () => setContractStatus(state.contractRow, "resign", true));
@@ -195,7 +199,7 @@ function renderDashboard(d) {
   $("yearCaption").textContent = `${fmt(exits.resignation)} resignation · ${fmt(exits.termination)} termination · ${fmt(exits.retirement)} retirement`;
   $("rfpCount").textContent = (d.rfpAlerts || []).length + " recent records";
   $("lastUpdated").textContent = "Updated " + new Date(d.generatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  state.dashboard = d; renderContracts(); renderInterviews(d); renderJoiners(d);
+  state.dashboard = d; renderContracts(); renderSchedule(d); renderJoiners(d);
   $("rfpRows").innerHTML = d.rfpAlerts?.length ? d.rfpAlerts.map(r => `<tr><td><div class="employee-cell"><b>${esc(r.position)}</b><small>${esc(r.rfpCode)}</small></div></td><td>${esc(r.businessUnit)}</td><td>${esc(r.contract)}</td><td>${esc(r.process)}</td></tr>`).join("") : `<tr><td colspan="4" class="empty-cell">No RFP records received in ${d.currentYear}.</td></tr>`;
   $("rfpYearCaption").textContent = String(d.currentYear || "");
   renderActivity(d.latestActivities || [], $("latestActivity"), false); renderActivity(d.activityHistory || [], $("historyList"), true);
@@ -219,11 +223,27 @@ function renderJoiners(d) {
   $("joinerList").innerHTML = rows.length ? rows.map(r => `<div class="activity-item"><span class="avatar">${esc(initial(r.name))}</span><div class="activity-copy"><b>${esc(r.name)}</b><small>${esc([r.position, r.businessUnit, r.contract].filter(x => x && x !== "—").join(" · ") || "—")}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span><small>${esc(r.joinDate)}</small></div></div>`).join("") : emptyBlock("user-plus", "No one joining soon");
 }
 const soonLabel = days => days === 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days`;
-function renderInterviews(d) {
-  const rows = d.upcomingInterviews || [];
-  $("interviewCount").textContent = `${rows.length} scheduled`; $("interviewCount").hidden = !rows.length;
-  $("interviewList").innerHTML = rows.length ? rows.map(r => `<div class="activity-item"><span class="round-tag ${r.round.startsWith("2") ? "second" : ""}">${r.round.startsWith("2") ? "2nd" : "1st"}</span><div class="activity-copy"><b>${esc(r.candidate || r.position)}</b><small>${esc([r.candidate ? r.position : "", r.businessUnit, r.rfpCode].filter(x => x && x !== "—").join(" · ") || "—")}</small></div><div class="joiner-when"><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span><small>${esc(r.date)}</small></div></div>`).join("") : emptyBlock("calendar", "No interviews scheduled");
+const SCHEDULE_ICON = { interview: "users", offering: "file-signature", psikotest: "file-check", mcu: "heart-pulse" };
+// Upcoming schedule: dated pipeline steps for the next 14 days, grouped by day. Each entry opens its details.
+function renderSchedule(d) {
+  const rows = d.upcomingSchedule || [];
+  $("scheduleCount").textContent = `${rows.length} scheduled`; $("scheduleCount").hidden = !rows.length;
+  if (!rows.length) { $("scheduleList").innerHTML = emptyBlock("calendar", "Nothing scheduled"); return; }
+  let day = null;
+  $("scheduleList").innerHTML = rows.map((r, i) => {
+    const head = r.daysUntil !== day ? `<div class="schedule-day"><b>${soonLabel(r.daysUntil)}</b><span>${esc(r.weekday)}, ${esc(r.date)}</span></div>` : ""; day = r.daysUntil;
+    return `${head}<button type="button" class="activity-item schedule-item" data-schedule="${i}"><span class="schedule-ico is-${r.kind}">${svgIcon(SCHEDULE_ICON[r.kind] || "calendar", 14)}</span><div class="activity-copy"><b>${esc(r.candidate || r.position)}</b><small><em>${esc(r.label)}</em>${esc([r.candidate ? r.position : "", r.businessUnit].filter(x => x && x !== "—").map(x => " · " + x).join(""))}</small></div>${svgIcon("chevron-right", 14)}</button>`;
+  }).join("");
 }
+function openScheduleDetail(index) {
+  const r = (state.dashboard?.upcomingSchedule || [])[index]; if (!r) return; state.scheduleRow = r.rowNumber;
+  $("scheduleModalIcon").className = "modal-icon schedule-ico is-" + r.kind; $("scheduleModalIcon").innerHTML = svgIcon(SCHEDULE_ICON[r.kind] || "calendar", 17);
+  $("scheduleModalTitle").textContent = r.candidate || r.position; $("scheduleModalSub").textContent = [r.candidate ? r.position : "", r.rfpCode, `Row ${r.rowNumber}`].filter(Boolean).join(" · ");
+  $("scheduleSummary").innerHTML = `<div><small>${esc(r.label)}</small><b>${esc(r.weekday)}, ${esc(r.date)}</b></div><span class="days-chip ${r.daysUntil <= 1 ? "safe" : "neutral"}">${soonLabel(r.daysUntil)}</span>`;
+  $("scheduleInfo").innerHTML = (r.details || []).map(item => `<div${item.label.trim().toLowerCase() === "remarks" ? ' class="is-wide"' : ""}><dt>${esc(item.label)}</dt><dd${item.label.trim().toLowerCase() === "remarks" ? ' class="is-multiline"' : ""}>${/^https?:\/\/\S+$/i.test(item.value) ? `<a class="cell-link" href="${escAttr(item.value)}" target="_blank" rel="noopener noreferrer">${svgIcon("external-link", 12)}<span>Open link</span></a>` : esc(item.value)}</dd></div>`).join("");
+  openModal("scheduleModal", $("cancelScheduleModal"));
+}
+function closeScheduleDetail() { closeModal("scheduleModal"); }
 function openContractMenu(button, rowNumber) {
   if (Pop.current?.anchor === button) { Pop.close(); return; }
   const panel = document.createElement("div"); panel.className = "select-pop stage-menu"; panel.setAttribute("role", "menu"); panel.tabIndex = -1;
@@ -641,6 +661,7 @@ async function loadPipeline(forceRefresh = false, quiet = false) {
     select.innerHTML = `<option value="">All business units</option>${units.map(u => `<option value="${escAttr(u)}">${esc(u)}</option>`).join("")}`; select.value = units.includes(keep) ? keep : ""; syncSelect(select);
     renderPipeline();
     if (!$("pipeModal").hidden && !$("pipeModal").dataset.dirty && pipeCard(p.detailRow)) openPipeDetail(p.detailRow, true);
+    if (p.openAfterLoad) { const rowNumber = p.openAfterLoad; p.openAfterLoad = null; if (pipeCard(rowNumber)) openPipeDetail(rowNumber); }
   } catch (error) {
     if (token !== p.token) return;
     if (!p.loaded) $("pipeBoard").innerHTML = `<div class="k-notice">${emptyBlock("alert-triangle", "Could not load the pipeline", "Check the message below, then refresh.")}</div>`;

@@ -75,7 +75,7 @@
         </div>
         <div class="dashboard-grid">
           <section class="panel"><div class="panel-heading"><div><h2>Upcoming Contract End Dates</h2><p>Next 90 days</p></div><span class="count-pill amber" id="contractCount">—</span></div><div class="table-scroll reminder-scroll"><table><thead><tr><th>Employee</th><th>Business unit</th><th>Contract end</th><th class="col-actions">Status</th></tr></thead><tbody id="contractRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div></section>
-          <section class="panel"><div class="panel-heading"><div><h2>Upcoming Interviews</h2><p>Next 7 days</p></div><span class="count-pill blue" id="interviewCount">—</span></div><div id="interviewList" class="activity-list reminder-scroll"><div class="empty-state">Loading…</div></div></section>
+          <section class="panel"><div class="panel-heading"><div><h2>Upcoming Schedule</h2><p>Next 14 days</p></div><span class="count-pill blue" id="scheduleCount">—</span></div><div id="scheduleList" class="activity-list reminder-scroll"><div class="empty-state">Loading…</div></div></section>
           <section class="panel"><div class="panel-heading"><div><h2>Latest RFP Records</h2><p>Latest requests received in the current year</p></div><span class="count-pill blue" id="rfpCount">0 alerts</span></div><div class="table-scroll"><table><thead><tr><th>RFP / position</th><th>Business unit</th><th>Contract</th><th>Process</th></tr></thead><tbody id="rfpRows"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody></table></div><div class="panel-foot"><span>Source: 2026 Rec Pipeline</span><span id="rfpYearCaption">Current year</span></div></section>
           <section class="panel"><div class="panel-heading"><div><h2>Joining Soon</h2><p>Next 7 days</p></div><span class="count-pill blue" id="joinerCount">—</span></div><div id="joinerList" class="activity-list reminder-scroll"><div class="empty-state">Loading…</div></div></section>
           <section class="panel collapsible" id="activityPanel" data-collapse="activity"><div class="panel-heading"><div><h2>Activity Log</h2><p>Latest actions performed in EMP</p></div><button type="button" class="panel-toggle" aria-expanded="false" aria-controls="latestActivity" aria-label="Show or hide Activity Log"><span data-icon="chevron-down"></span></button></div><div class="collapse-body"><div id="latestActivity" class="activity-list"></div></div></section>
@@ -217,6 +217,12 @@
       <div id="sendError" class="form-error" hidden></div>
       <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelSendModal">Cancel</button><button class="primary-button" id="sendOk">Send to pipeline</button></div></div>
     </form>
+  </div></div>
+
+  <div class="modal-backdrop" id="scheduleModal" hidden><div class="modal record-modal" role="dialog" aria-modal="true" aria-labelledby="scheduleModalTitle">
+    <div class="modal-header"><div class="modal-title"><span class="modal-icon" id="scheduleModalIcon"></span><div><h2 id="scheduleModalTitle">Schedule</h2><p id="scheduleModalSub"></p></div></div><button type="button" class="close-button" id="closeScheduleModal" aria-label="Close"><span data-icon="x"></span></button></div>
+    <div class="modal-body"><div class="contract-summary" id="scheduleSummary"></div><dl class="info-grid" id="scheduleInfo"></dl></div>
+    <div class="modal-footer"><span class="modal-hint"></span><div class="modal-actions"><button type="button" class="secondary-button" id="cancelScheduleModal">Close</button><button type="button" class="primary-button" id="scheduleOpen">Open in Hiring Pipeline</button></div></div>
   </div></div>
 
   <div class="modal-backdrop" id="confirmModal" hidden><div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">

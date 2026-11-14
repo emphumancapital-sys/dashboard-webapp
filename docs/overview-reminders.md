@@ -45,3 +45,9 @@ Built on the v10 build. Adds `netlify/functions/contracts.mjs`, changes `dashboa
 - The row action for Sent to C&B is a check icon (with tooltip), not a send icon.
 - Clicking a contract row, or "View details" in its `...` menu, opens a dialog with every filled column of that row from `Extend 2026`, the end date and the current status.
 - The dialog has a `Sent to C&B` button and a `Mark as Resign` link for rows that still need action. Using them there does not ask for a second confirmation; the row icon still does.
+
+## Upcoming Schedule (replaces Upcoming Interviews)
+- Source: `2026 Rec Pipeline`. Lists every dated step from today through the next 14 days: `1st Intv`, `2nd Intv`, `Offering In`, `Offering Done`, `Psychological Test` (shown as Psikotest) and `MCU`.
+- Entries are grouped by day (Today, Tomorrow, In N days) and show the candidate (or the position when no candidate is filled), the step, position and business unit.
+- Rows whose `Status` is Failed or whose `RFP Process` is completed or cancelled are left out. A cell that does not hold a date is skipped.
+- Clicking an entry opens a dialog with the step, its date and every filled column of that row. "Open in Hiring Pipeline" jumps to the same request's card details on the board.

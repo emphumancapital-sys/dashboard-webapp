@@ -329,6 +329,11 @@ tr.is-muted td{color:var(--faint)}tr.is-muted .employee-cell b{color:var(--muted
 #contractRows .row-action.good,#contractRows tr:hover .row-action.good{color:var(--brand-ink)}
 .contract-summary{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--th)}.contract-summary small{display:block;color:var(--muted);font-size:11.5px}.contract-summary b{font-size:15px;font-weight:650;letter-spacing:-.01em}.summary-spacer{flex:1}
 .modal-actions .primary-button svg{width:14px;height:14px}
+.schedule-day{display:flex;align-items:baseline;gap:8px;padding:10px 6px 4px;font-size:11.5px;color:var(--muted)}.schedule-day:first-child{padding-top:2px}.schedule-day b{font-size:12px;font-weight:650;color:var(--ink)}
+.schedule-item{width:100%;border:0;background:none;text-align:left;cursor:pointer;color:inherit}.schedule-item:active:not(:disabled){transform:none}.schedule-item>svg{flex:none;width:14px;height:14px;color:var(--faint);opacity:0;transition:opacity .15s}.schedule-item:hover>svg,.schedule-item:focus-visible>svg{opacity:1}
+.schedule-item small em{font-style:normal;font-weight:600;color:var(--ink-2)}
+.schedule-ico{flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:var(--blue-bg);color:var(--blue)}.schedule-ico svg{width:14px;height:14px}.schedule-ico.is-offering{background:var(--amber-bg);color:var(--amber)}.schedule-ico.is-psikotest{background:var(--violet-bg);color:var(--violet)}.schedule-ico.is-mcu{background:var(--brand-soft);color:var(--brand-ink)}
+.modal-icon.schedule-ico{width:34px;height:34px;border-radius:10px}.modal-icon.schedule-ico svg{width:17px;height:17px}
 .joiner-when{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none}.joiner-when small{color:var(--faint);font-size:11px}
 
 /* ---------- Responsive ---------- */
